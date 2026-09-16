@@ -209,7 +209,10 @@ async function openaiHandle(ctx, cfg) {
   const requestedModel = asString(raw.model);
   if (requestedModel && allowlist.includes(requestedModel)) chosenModel = requestedModel;
 
-  let maxTokens = 1200;
+  // Default completion budget respects the operator's cap (structured JSON
+  // answers should stay short — generation time, not prefill, is what usually
+  // dominates latency on OpenAI-compatible aggregators).
+  let maxTokens = Math.min(1200, maxTokensCap);
   if (raw.max_tokens !== undefined) {
     const n = Number(raw.max_tokens);
     if (Number.isFinite(n) && n > 0) maxTokens = Math.min(Math.floor(n), maxTokensCap);

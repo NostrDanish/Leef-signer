@@ -202,13 +202,18 @@ const origin = z
   .string()
   .refine((o) => {
     if (o === '*') return true;
+    // Wildcard subdomain form: https://*.example.com (matches any subdomain).
+    if (o.startsWith('https://*.')) {
+      const suffix = o.slice('https://*.'.length);
+      return /^([a-z0-9-]+\.)+[a-z]{2,}$/.test(suffix);
+    }
     try {
       const u = new URL(o);
       return u.protocol === 'https:' || u.hostname === 'localhost' || u.hostname === '127.0.0.1';
     } catch {
       return false;
     }
-  }, 'Origin must be https:// (or localhost for dev), or * for public mode');
+  }, 'Origin must be https:// (or localhost for dev), https://*.domain for all subdomains, or * for public mode');
 
 const rateLimitRule = z.object({
   /** What identifies the caller. */

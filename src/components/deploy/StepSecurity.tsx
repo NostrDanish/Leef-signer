@@ -20,7 +20,7 @@ export function StepSecurity({ wizard }: { wizard: WizardState }) {
       <div className="space-y-5">
         <Field
           label="Allowed origins (CORS)"
-          hint="One per line. Only these sites may call the API cross-origin. Use * only for a public API."
+          hint="One per line. Only these sites may call the API cross-origin. https://*.domain covers all subdomains; use * only for a public API."
         >
           <textarea
             value={sec.allowedOrigins.join('\n')}
@@ -32,8 +32,8 @@ export function StepSecurity({ wizard }: { wizard: WizardState }) {
                 },
               })
             }
-            rows={3}
-            placeholder={'https://savedd.com\nhttps://www.savedd.com'}
+            rows={4}
+            placeholder={'https://leef-trader.vercel.app\nhttps://*.shakespeare.to'}
             className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </Field>

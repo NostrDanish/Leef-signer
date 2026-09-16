@@ -18,7 +18,7 @@ LEEF Trader (browser)
       │  HTTPS, structured JSON  { task, data }
       ▼
 leef-trader-ai (your Cloudflare Worker)
-      │  CORS allowlist · 20 req/min · 10s timeout · server-side system prompt
+      │  CORS allowlist · 20 req/min · 30s timeout · server-side system prompt
       │  PPQ_API_KEY as a Worker Secret (env.*) — never in code/Git/browser
       ▼
 PayPerQ (https://api.ppq.ai) — OpenAI-compatible
@@ -29,8 +29,8 @@ deepseek/deepseek-v4-flash (ZDR-routed, JSON-mode)
 The AI is an **analyst, never the trading engine**. It cannot sign, broadcast, or override
 deterministic risk controls — the Worker constructs `server system prompt + client data`, forces
 the model, and the client can never inject a system prompt or pick an arbitrary model. If PPQ is
-down or slow, the Worker returns an error within 10 seconds and LEEF Trader keeps trading
-deterministically.
+down or slow, the Worker returns a clean `PROVIDER_TIMEOUT`/`UPSTREAM_ERROR` and LEEF Trader keeps
+trading deterministically — AI calls are fire-and-forget outside the trading loop.
 
 ## The principle
 
@@ -58,9 +58,10 @@ Preloaded when you open the wizard (also selectable on the Template step):
 | Model | `deepseek/deepseek-v4-flash` — cheap, fast, 1M ctx, JSON mode, ZDR-capable (chosen from the live `/v1/models` catalog) |
 | Model override | `PPQ_MODEL` plain-text Worker var — change model or routing suffix (`:floor` / `:nitro`) from the Cloudflare dashboard without redeploying |
 | Privacy | `provider.zdr: true` (Zero Data Retention routing where PPQ supports it) |
-| CORS | `https://leef-trader.vercel.app`, `https://leef-trader.shakespeare.wtf` |
+| CORS | `https://leef-trader.vercel.app`, `https://leef-trader.shakespeare.wtf`, `https://leef-trader.shakespeare.to`, `https://*.shakespeare.to` (any Shakespeare-hosted LEEF build) |
 | Rate limit | 20 req/min per IP on `/api/ai` |
-| Timeout | 10s upstream — AI can never block the trading loop |
+| Timeout | 30s upstream — a full structured analysis legitimately takes 6–25s on ZDR flash endpoints; AI calls are fire-and-forget, so this never blocks the trading loop |
+| Output budget | 900-token cap + a brevity rule in the system prompt (completion length, not prefill, dominates latency) |
 | Response | `response_format: json_object` — always structured JSON with `"trade_authorization": false` |
 
 Request contract: `POST /api/ai` with `{ "task": "market_analysis", "data": { … } }` (or a raw

@@ -178,8 +178,9 @@ export function manifestForTemplate(
 /* The AI is an analyst, never the trading engine: it cannot sign,     */
 /* broadcast, or override deterministic risk controls. The preset      */
 /* fronts PayPerQ (OpenAI-compatible) with a server-controlled system  */
-/* prompt, a catalog-verified low-cost model, ZDR routing, and an      */
-/* 10s upstream timeout so AI failure never blocks the trading loop.   */
+/* prompt, a catalog-verified low-cost model, ZDR routing, and a 30s   */
+/* upstream timeout (analyses are fire-and-forget, never blocking the  */
+/* trading loop).                                                      */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -221,6 +222,8 @@ RULES OF EVIDENCE:
 
 TASKS you may receive: market_analysis, strategy_analysis, opportunity_explanation, post_trade_analysis, evidence_review, health_check. If the task is unknown, analyze what was provided and note the unknown task in warnings. AI is event-driven (batches, regime changes, repeated failures, manual review) — not per-trade.
 
+BREVITY IS MANDATORY: keep the entire response under ~350 tokens. Short bullets, no essays, no restating the input. Long answers are slow and expensive.
+
 OUTPUT — always exactly one JSON object, no prose around it:
 {
   "assessment": "supportive | neutral | cautious | concerned",
@@ -239,6 +242,9 @@ export function leefTraderManifest(workerName: string): SignerManifest {
   m.security.allowedOrigins = [
     'https://leef-trader.vercel.app',
     'https://leef-trader.shakespeare.wtf',
+    'https://leef-trader.shakespeare.to',
+    // Any other Shakespeare-hosted LEEF Trader build (preview/staging slugs).
+    'https://*.shakespeare.to',
   ];
   m.privacy.mode = 'privacy';
   m.providers.ai = {
@@ -248,16 +254,19 @@ export function leefTraderManifest(workerName: string): SignerManifest {
     providerName: 'PayPerQ (PPQ)',
     systemPrompt: LEEF_TRADER_SYSTEM_PROMPT,
     temperature: 0.2,
-    maxTokens: 1500,
+    // Cap kept small on purpose: a full structured analysis is a few hundred
+    // tokens, and completion generation dominates latency (~30–60 tok/s on
+    // ZDR flash endpoints). Shorter answer = faster, cheaper, same signal.
+    maxTokens: 900,
     modelAllowlist: [],
     streaming: false,
     secretName: 'PPQ_API_KEY',
     modelEnvName: 'PPQ_MODEL',
     tokenParam: 'max_completion_tokens',
-    // 10s: top of the 5–10s band — observed cold-prefill on PPQ's ZDR pool can
-    // straddle 8s during provider incidents; still short enough that AI can
-    // never block the trading loop.
-    timeoutMs: 10_000,
+    // 30s: a full analysis legitimately takes 6–25s on ZDR flash endpoints.
+    // AI calls are fire-and-forget outside the trading loop, so this bounds
+    // the analysis fetch — it never blocks deterministic trading.
+    timeoutMs: 30_000,
     extraBody: {
       // PPQ Zero Data Retention routing (verified against the live catalog:
       // deepseek/deepseek-v4-flash advertises privacyLevel "zdr").

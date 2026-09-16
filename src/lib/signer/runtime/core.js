@@ -61,6 +61,10 @@ export function makeRequestId() {
 /* ------------------------------------------------------------------ */
 
 /**
+ * Exact origins are reflected verbatim; entries of the form
+ * "https://*.example.com" match any subdomain of example.com (useful for
+ * preview/hosting deployments). The bare apex is NOT matched by a wildcard.
+ *
  * @param {Request} request
  * @param {string[]} allowed
  * @returns {string | null}
@@ -69,7 +73,28 @@ export function corsAllowOrigin(request, allowed) {
   const origin = request.headers.get('Origin');
   if (!origin) return null; // same-origin / non-browser
   if (allowed.includes('*')) return '*';
-  return allowed.includes(origin) ? origin : null;
+  if (allowed.includes(origin)) return origin;
+
+  // Wildcard-subdomain pass.
+  let host = '';
+  try {
+    host = new URL(origin).hostname.toLowerCase();
+  } catch {
+    // Defensive fallback if the URL parser rejects an odd origin.
+    const m = origin.toLowerCase();
+    const schemeIdx = m.indexOf('://');
+    host = (schemeIdx >= 0 ? m.slice(schemeIdx + 3) : m).split('/')[0].split(':')[0];
+  }
+  if (!host) return null;
+  for (const entry of allowed) {
+    const e = entry.toLowerCase();
+    const schemeIdx = e.indexOf('://');
+    const entryHost = (schemeIdx >= 0 ? e.slice(schemeIdx + 3) : e).split('/')[0];
+    if (!entryHost.startsWith('*.')) continue;
+    const suffix = entryHost.slice(1); // ".example.com"
+    if (host.endsWith(suffix) && host.length > suffix.length) return origin;
+  }
+  return null;
 }
 
 /**

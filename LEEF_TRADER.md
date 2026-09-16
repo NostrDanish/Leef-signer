@@ -69,14 +69,18 @@ remains authoritative. AI output is soft information only.
 
 | Condition | HTTP | Body |
 |---|---|---|
-| PPQ slow / down (> 10 s) | 504 | `{"error":{"code":"PROVIDER_TIMEOUT", …}}` |
+| PPQ slow / down (> 30 s) | 504 | `{"error":{"code":"PROVIDER_TIMEOUT", …}}` |
 | PPQ unreachable / 5xx | 502 | `PROVIDER_UNAVAILABLE` / `UPSTREAM_ERROR` |
 | PPQ key rejected | 502 | `UPSTREAM_ERROR` ("credential was rejected") |
 | Rate limit (> 20/min per IP) | 429 | `RATE_LIMITED` (+ `Retry-After`) |
 | Bad body / oversize | 400 | `INVALID_REQUEST` / `PAYLOAD_TOO_LARGE` |
 
 Any non-200 ⇒ AI unavailable ⇒ keep trading deterministically. The upstream
-timeout is 10 s by configuration, so AI can never stall the trading loop.
+timeout is 30 s by configuration: a full structured analysis legitimately
+takes 6–25 s on ZDR flash endpoints (completion generation, not prefill,
+dominates). Because AI calls are fire-and-forget outside the trading loop,
+this only bounds the analysis fetch — it can never stall trading. The client
+should use a fetch timeout slightly above the worker cap (e.g. 35 s).
 
 ## Hard guarantees (enforced server-side)
 
@@ -85,7 +89,9 @@ timeout is 10 s by configuration, so AI can never stall the trading loop.
   allowlisted by the operator (default: not allowlisted).
 - Server-controlled system prompt; client system prompts are stripped.
 - CORS reflect-allowlist: `https://leef-trader.vercel.app`,
-  `https://leef-trader.shakespeare.wtf` (preflight from other origins → 403).
+  `https://leef-trader.shakespeare.wtf`, `https://leef-trader.shakespeare.to`,
+  and `https://*.shakespeare.to` (any Shakespeare-hosted LEEF build).
+  Preflight from any other origin → 403.
 - 256 KB request cap; sanitized errors (upstream bodies never forwarded).
 - `provider.zdr: true` — PPQ routes to Zero-Data-Retention providers where
   supported.
@@ -105,11 +111,12 @@ Pick models from the live catalog (`GET https://api.ppq.ai/v1/models`); prefer
 were observed to invent data — do not downgrade below flash-class reasoning.
 
 **ZDR note:** `provider.zdr: true` constrains PPQ to its Zero-Data-Retention
-provider pool, which is smaller and can be intermittently slow — during such
-windows the gateway answers `504 PROVIDER_TIMEOUT` within 10 s and LEEF Trader
-simply continues without analysis. If you would rather trade privacy for
-availability, redeploy with `extraBody: {}` (drop the `provider.zdr` flag) from
-the wizard's Providers step.
+endpoints (per PPQ's API docs, ZDR is opt-in per request over the API — the
+flag is what enforces it, so keep it). The ZDR pool is smaller and can be
+intermittently slow; during such windows the gateway answers
+`504 PROVIDER_TIMEOUT` and LEEF Trader simply continues without analysis. If
+you would rather trade privacy for availability, redeploy with `extraBody: {}`
+(drop the `provider.zdr` flag) from the wizard's Providers step.
 
 ## Cadence guidance
 

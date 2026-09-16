@@ -9,7 +9,7 @@ centralized API-key vault.
 This project is a fork of [0xSigner](https://github.com/NostrDanish/0xsigner), tuned
 for [LEEF Trader](https://github.com/NostrDanish/leef-trader): it ships a preloaded
 preset that deploys the **LEEF Trader AI analysis gateway** (OpenAI-compatible →
-PayPerQ, server-side system prompt, ZDR routing, 8s timeout, 20 req/min). The
+PayPerQ, server-side system prompt, ZDR routing, 10s timeout, 20 req/min). The
 generic machinery (provider adapters, templates, CORS lockdown, secret injection)
 is fully preserved, so additional providers and keys can be added to the same
 worker later.

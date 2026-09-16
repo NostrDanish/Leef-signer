@@ -179,7 +179,7 @@ export function manifestForTemplate(
 /* broadcast, or override deterministic risk controls. The preset      */
 /* fronts PayPerQ (OpenAI-compatible) with a server-controlled system  */
 /* prompt, a catalog-verified low-cost model, ZDR routing, and an      */
-/* 8s upstream timeout so AI failure never blocks the trading loop.    */
+/* 10s upstream timeout so AI failure never blocks the trading loop.   */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -254,7 +254,10 @@ export function leefTraderManifest(workerName: string): SignerManifest {
     secretName: 'PPQ_API_KEY',
     modelEnvName: 'PPQ_MODEL',
     tokenParam: 'max_completion_tokens',
-    timeoutMs: 8_000,
+    // 10s: top of the 5–10s band — observed cold-prefill on PPQ's ZDR pool can
+    // straddle 8s during provider incidents; still short enough that AI can
+    // never block the trading loop.
+    timeoutMs: 10_000,
     extraBody: {
       // PPQ Zero Data Retention routing (verified against the live catalog:
       // deepseek/deepseek-v4-flash advertises privacyLevel "zdr").

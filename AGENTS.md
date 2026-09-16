@@ -6,7 +6,7 @@ The wizard turns a form into a hardened Cloudflare Worker fronting PayPerQ
 (OpenAI-compatible): `PPQ_API_KEY` goes to the Worker secret store, the model
 (`deepseek/deepseek-v4-flash`, overridable via the `PPQ_MODEL` plain-text var) and
 the LEEF analysis system prompt are server-controlled, CORS is locked to the LEEF
-Trader origins, and `/api/ai` is rate-limited (20/min) with an 8s upstream timeout.
+Trader origins, and `/api/ai` is rate-limited (20/min) with a 10s upstream timeout.
 The AI is an analyst, never the trading engine — it cannot sign, broadcast, or
 override deterministic risk controls. The generic 0xSigner provider machinery
 (search, generic REST, IP/geo, indexer, crawler, Tor) stays intact for future

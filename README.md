@@ -18,7 +18,7 @@ LEEF Trader (browser)
       │  HTTPS, structured JSON  { task, data }
       ▼
 leef-trader-ai (your Cloudflare Worker)
-      │  CORS allowlist · 20 req/min · 8s timeout · server-side system prompt
+      │  CORS allowlist · 20 req/min · 10s timeout · server-side system prompt
       │  PPQ_API_KEY as a Worker Secret (env.*) — never in code/Git/browser
       ▼
 PayPerQ (https://api.ppq.ai) — OpenAI-compatible
@@ -29,7 +29,7 @@ deepseek/deepseek-v4-flash (ZDR-routed, JSON-mode)
 The AI is an **analyst, never the trading engine**. It cannot sign, broadcast, or override
 deterministic risk controls — the Worker constructs `server system prompt + client data`, forces
 the model, and the client can never inject a system prompt or pick an arbitrary model. If PPQ is
-down or slow, the Worker returns an error within 8 seconds and LEEF Trader keeps trading
+down or slow, the Worker returns an error within 10 seconds and LEEF Trader keeps trading
 deterministically.
 
 ## The principle
@@ -60,7 +60,7 @@ Preloaded when you open the wizard (also selectable on the Template step):
 | Privacy | `provider.zdr: true` (Zero Data Retention routing where PPQ supports it) |
 | CORS | `https://leef-trader.vercel.app`, `https://leef-trader.shakespeare.wtf` |
 | Rate limit | 20 req/min per IP on `/api/ai` |
-| Timeout | 8s upstream — AI can never block the trading loop |
+| Timeout | 10s upstream — AI can never block the trading loop |
 | Response | `response_format: json_object` — always structured JSON with `"trade_authorization": false` |
 
 Request contract: `POST /api/ai` with `{ "task": "market_analysis", "data": { … } }` (or a raw

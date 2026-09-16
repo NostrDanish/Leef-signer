@@ -1,39 +1,29 @@
 /**
  * Provider adapters — one per ProviderType. Serialized into the generated
- * Worker, so: no imports of local files, no `any`, Worker-runtime APIs only.
+ * Worker, so: no local imports at runtime, Worker-runtime APIs only.
+ *
+ * Plain JavaScript on purpose (see core.js): Cloudflare does not transpile
+ * TypeScript on upload, so the generated worker must be valid ECMAScript.
  *
  * Every adapter receives the validated request plus the full env and reads
  * its secret ONLY from env (env.BRAVE_API_KEY etc.) — never from config.
  */
 
-import {
-  asString,
-  checkTargetUrl,
-  getSecret,
-  jsonResponse,
-  errorResponse,
-  readJsonBody,
-  type RuntimeManifest,
-  type WorkerEnv,
-} from './core';
+/* global readJsonBody, asString, getSecret, jsonResponse, errorResponse, checkTargetUrl */
+/* (symbols above are provided by core.js, concatenated by generator.ts)   */
 
-export interface ProviderResult {
-  response: Response;
-}
-
-export interface ProviderContext {
-  request: Request;
-  env: WorkerEnv;
-  manifest: RuntimeManifest;
-  allowed: string[]; // CORS origins
-  requestId: string;
-}
-
-type Cfg = Record<string, unknown>;
+/** @typedef {{ response: Response }} ProviderResult */
+/** @typedef {{ request: Request, env: Record<string, unknown>, manifest: Record<string, any>, allowed: string[], requestId: string }} ProviderContext */
+/** @typedef {Record<string, unknown>} Cfg */
 
 const MAX_BODY = 256 * 1024; // 256 KB default cap on inbound JSON
 
-function unavailable(ctx: ProviderContext, what: string): ProviderResult {
+/**
+ * @param {ProviderContext} ctx
+ * @param {string} what
+ * @returns {ProviderResult}
+ */
+function unavailable(ctx, what) {
   return {
     response: errorResponse(
       'CONFIGURATION_ERROR',
@@ -46,7 +36,8 @@ function unavailable(ctx: ProviderContext, what: string): ProviderResult {
   };
 }
 
-async function safeJson(upstream: Response): Promise<unknown> {
+/** @param {Response} upstream */
+async function safeJson(upstream) {
   try {
     return await upstream.json();
   } catch {
@@ -54,8 +45,13 @@ async function safeJson(upstream: Response): Promise<unknown> {
   }
 }
 
-/** Map an upstream status to a client-safe message (never the raw body). */
-function upstreamMessage(status: number, label: string): string {
+/**
+ * Map an upstream status to a client-safe message (never the raw body).
+ * @param {number} status
+ * @param {string} label
+ * @returns {string}
+ */
+function upstreamMessage(status, label) {
   if (status === 401 || status === 403) return `${label} credential was rejected`;
   if (status === 402) return `${label} credit balance is exhausted`;
   if (status === 429) return `${label} is rate-limited right now`;
@@ -67,17 +63,18 @@ function upstreamMessage(status: number, label: string): string {
 /* Brave Search                                                        */
 /* ------------------------------------------------------------------ */
 
-async function braveHandle(ctx: ProviderContext, cfg: Cfg): Promise<ProviderResult> {
+/** @param {ProviderContext} ctx @param {Cfg} cfg @returns {Promise<ProviderResult>} */
+async function braveHandle(ctx, cfg) {
   const key = getSecret(ctx.env, asString(cfg.secretName) ?? 'BRAVE_API_KEY');
   if (!key) return unavailable(ctx, 'Brave Search');
 
-  let body: unknown;
+  let body;
   try {
     body = await readJsonBody(ctx.request, MAX_BODY);
   } catch (e) {
     return { response: errorResponse(e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE' ? 'PAYLOAD_TOO_LARGE' : 'INVALID_REQUEST', 'Body must be JSON', 400, ctx.request, ctx.allowed, ctx.requestId) };
   }
-  const raw = (body ?? {}) as Record<string, unknown>;
+  const raw = (body ?? {});
   const q = asString(raw.q)?.trim();
   if (!q) return { response: errorResponse('INVALID_REQUEST', 'q must be a non-empty string', 400, ctx.request, ctx.allowed, ctx.requestId) };
   if (q.length > 500) return { response: errorResponse('INVALID_REQUEST', 'q is too long', 400, ctx.request, ctx.allowed, ctx.requestId) };
@@ -114,48 +111,98 @@ async function braveHandle(ctx: ProviderContext, cfg: Cfg): Promise<ProviderResu
 /* OpenAI-compatible AI                                                */
 /* ------------------------------------------------------------------ */
 
-interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
+/** @typedef {{ role: 'system'|'user'|'assistant', content: string }} ChatMessage */
 
-function applySystemPrompt(messages: ChatMessage[], prompt: string): ChatMessage[] {
+/**
+ * The operator's system prompt is forced. Client-supplied system messages
+ * are always stripped — the client can never replace the server prompt.
+ * @param {ChatMessage[]} messages
+ * @param {string} prompt
+ * @returns {ChatMessage[]}
+ */
+function applySystemPrompt(messages, prompt) {
   if (!prompt) return messages;
   return [{ role: 'system', content: prompt }, ...messages.filter((m) => m.role !== 'system')];
 }
 
-async function openaiHandle(ctx: ProviderContext, cfg: Cfg): Promise<ProviderResult> {
+/** @param {ProviderContext} ctx @param {Cfg} cfg @returns {Promise<ProviderResult>} */
+async function openaiHandle(ctx, cfg) {
   const key = getSecret(ctx.env, asString(cfg.secretName) ?? 'OPENAI_API_KEY');
   if (!key) return unavailable(ctx, 'Engine AI');
   const endpoint = (asString(cfg.endpoint) ?? 'https://api.openai.com/v1').replace(/\/$/, '');
-  const model = asString(cfg.model) ?? 'gpt-4o-mini';
+  // Model precedence: operator-set Worker var (e.g. PPQ_MODEL) > manifest model.
+  // Clients can never request a model outside the optional allowlist.
+  const modelEnvName = asString(cfg.modelEnvName);
+  const envModel = modelEnvName ? asString(ctx.env[modelEnvName]) : undefined;
+  const model = envModel ?? asString(cfg.model) ?? 'gpt-4o-mini';
   const systemPrompt = asString(cfg.systemPrompt) ?? '';
   const maxTokensCap = typeof cfg.maxTokens === 'number' ? cfg.maxTokens : 2000;
   const temperature = typeof cfg.temperature === 'number' ? cfg.temperature : undefined;
-  const allowlist = Array.isArray(cfg.modelAllowlist) ? (cfg.modelAllowlist as unknown[]).filter((m): m is string => typeof m === 'string') : [];
+  // Which token field the upstream expects (OpenAI's newest require max_completion_tokens).
+  const tokenParam = asString(cfg.tokenParam) ?? 'max_completion_tokens';
+  // Short, configurable upstream timeout so AI can never block a caller indefinitely.
+  const timeoutMs =
+    typeof cfg.timeoutMs === 'number' && Number.isFinite(cfg.timeoutMs)
+      ? Math.min(Math.max(Math.floor(cfg.timeoutMs), 1000), 120_000)
+      : 60_000;
+  const allowlist = Array.isArray(cfg.modelAllowlist) ? cfg.modelAllowlist.filter((m) => typeof m === 'string') : [];
+  // Operator-controlled extra upstream body fields (e.g. provider routing, response_format).
+  const extra =
+    cfg.extraBody && typeof cfg.extraBody === 'object' && !Array.isArray(cfg.extraBody)
+      ? cfg.extraBody
+      : {};
 
-  let body: unknown;
+  let body;
   try {
     body = await readJsonBody(ctx.request, MAX_BODY);
   } catch (e) {
     return { response: errorResponse(e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE' ? 'PAYLOAD_TOO_LARGE' : 'INVALID_REQUEST', 'Body must be JSON', 400, ctx.request, ctx.allowed, ctx.requestId) };
   }
-  const raw = (body ?? {}) as Record<string, unknown>;
-  if (!Array.isArray(raw.messages) || raw.messages.length === 0 || raw.messages.length > 20) {
-    return { response: errorResponse('INVALID_REQUEST', 'messages must be a non-empty array (max 20)', 400, ctx.request, ctx.allowed, ctx.requestId) };
+  const raw = (body ?? {});
+
+  // Two accepted client contracts:
+  //   A) { messages: [{ role, content }, ...] }       — chat-style
+  //   B) { task: "...", message?: "...", data?: any } — structured task shorthand
+  /** @type {ChatMessage[]} */
+  let messages;
+  if (Array.isArray(raw.messages) && raw.messages.length > 0) {
+    if (raw.messages.length > 20) {
+      return { response: errorResponse('INVALID_REQUEST', 'messages must be a non-empty array (max 20)', 400, ctx.request, ctx.allowed, ctx.requestId) };
+    }
+    messages = [];
+    let total = 0;
+    for (const m of raw.messages) {
+      if (!m || typeof m !== 'object') return { response: errorResponse('INVALID_REQUEST', 'each message must be an object', 400, ctx.request, ctx.allowed, ctx.requestId) };
+      const r = m;
+      if (r.role !== 'system' && r.role !== 'user' && r.role !== 'assistant') return { response: errorResponse('INVALID_REQUEST', 'invalid message role', 400, ctx.request, ctx.allowed, ctx.requestId) };
+      if (typeof r.content !== 'string' || r.content.length === 0) return { response: errorResponse('INVALID_REQUEST', 'message content must be a string', 400, ctx.request, ctx.allowed, ctx.requestId) };
+      if (r.content.length > 24_000) return { response: errorResponse('INVALID_REQUEST', 'message content too long', 400, ctx.request, ctx.allowed, ctx.requestId) };
+      total += r.content.length;
+      messages.push({ role: r.role, content: r.content });
+    }
+    if (total > 64_000) return { response: errorResponse('INVALID_REQUEST', 'request too large', 400, ctx.request, ctx.allowed, ctx.requestId) };
+  } else if (typeof raw.task === 'string' && raw.task.trim().length > 0) {
+    const task = raw.task.trim().slice(0, 120);
+    const parts = [`Task: ${task}`];
+    if (typeof raw.message === 'string' && raw.message.length > 0) parts.push(raw.message.slice(0, 8_000));
+    if (raw.data !== undefined) {
+      let dataJson;
+      try {
+        dataJson = JSON.stringify(raw.data);
+      } catch {
+        dataJson = undefined;
+      }
+      if (dataJson) {
+        if (dataJson.length > 32_000) {
+          return { response: errorResponse('INVALID_REQUEST', 'data is too large', 400, ctx.request, ctx.allowed, ctx.requestId) };
+        }
+        parts.push(`Data:\n${dataJson}`);
+      }
+    }
+    messages = [{ role: 'user', content: parts.join('\n\n') }];
+  } else {
+    return { response: errorResponse('INVALID_REQUEST', 'Provide messages[] or a { task, data } pair', 400, ctx.request, ctx.allowed, ctx.requestId) };
   }
-  const messages: ChatMessage[] = [];
-  let total = 0;
-  for (const m of raw.messages) {
-    if (!m || typeof m !== 'object') return { response: errorResponse('INVALID_REQUEST', 'each message must be an object', 400, ctx.request, ctx.allowed, ctx.requestId) };
-    const r = m as Record<string, unknown>;
-    if (r.role !== 'system' && r.role !== 'user' && r.role !== 'assistant') return { response: errorResponse('INVALID_REQUEST', 'invalid message role', 400, ctx.request, ctx.allowed, ctx.requestId) };
-    if (typeof r.content !== 'string' || r.content.length === 0) return { response: errorResponse('INVALID_REQUEST', 'message content must be a string', 400, ctx.request, ctx.allowed, ctx.requestId) };
-    if (r.content.length > 24_000) return { response: errorResponse('INVALID_REQUEST', 'message content too long', 400, ctx.request, ctx.allowed, ctx.requestId) };
-    total += r.content.length;
-    messages.push({ role: r.role, content: r.content });
-  }
-  if (total > 64_000) return { response: errorResponse('INVALID_REQUEST', 'request too large', 400, ctx.request, ctx.allowed, ctx.requestId) };
 
   // Server controls the model; client may only pick from an explicit allowlist.
   let chosenModel = model;
@@ -168,21 +215,36 @@ async function openaiHandle(ctx: ProviderContext, cfg: Cfg): Promise<ProviderRes
     if (Number.isFinite(n) && n > 0) maxTokens = Math.min(Math.floor(n), maxTokensCap);
   }
 
-  const upstreamBody: Record<string, unknown> = {
-    model: chosenModel,
-    messages: applySystemPrompt(messages, systemPrompt),
-    max_completion_tokens: maxTokens,
-  };
+  // Server-controlled fields (model/messages/token cap) always win over extraBody.
+  /** @type {Record<string, unknown>} */
+  const upstreamBody = { ...extra };
+  upstreamBody.model = chosenModel;
+  upstreamBody.messages = applySystemPrompt(messages, systemPrompt);
+  upstreamBody[tokenParam] = maxTokens;
   if (temperature !== undefined) upstreamBody.temperature = temperature;
 
-  const upstream = await fetch(`${endpoint}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-    body: JSON.stringify(upstreamBody),
-    signal: AbortSignal.timeout(60_000),
-  }).catch(() => null);
+  let upstream;
+  try {
+    upstream = await fetch(`${endpoint}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify(upstreamBody),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (e) {
+    const timedOut = Boolean(e && typeof e === 'object' && (e.name === 'TimeoutError' || e.name === 'AbortError'));
+    return {
+      response: errorResponse(
+        timedOut ? 'PROVIDER_TIMEOUT' : 'PROVIDER_UNAVAILABLE',
+        timedOut ? 'AI provider timed out' : 'AI provider unreachable',
+        timedOut ? 504 : 502,
+        ctx.request,
+        ctx.allowed,
+        ctx.requestId,
+      ),
+    };
+  }
 
-  if (!upstream) return { response: errorResponse('PROVIDER_UNAVAILABLE', 'AI provider unreachable', 502, ctx.request, ctx.allowed, ctx.requestId) };
   if (!upstream.ok) {
     await upstream.body?.cancel().catch(() => undefined);
     return { response: errorResponse('UPSTREAM_ERROR', upstreamMessage(upstream.status, 'AI provider'), upstream.status === 429 ? 429 : 502, ctx.request, ctx.allowed, ctx.requestId) };
@@ -196,13 +258,14 @@ async function openaiHandle(ctx: ProviderContext, cfg: Cfg): Promise<ProviderRes
 
 const NEVER_FORWARD = new Set(['authorization', 'cookie', 'x-api-key', 'cf-access-token', 'host', 'content-length', 'connection']);
 
-async function genericRestHandle(ctx: ProviderContext, cfg: Cfg): Promise<ProviderResult> {
+/** @param {ProviderContext} ctx @param {Cfg} cfg @returns {Promise<ProviderResult>} */
+async function genericRestHandle(ctx, cfg) {
   const endpoint = asString(cfg.endpoint);
   if (!endpoint) return unavailable(ctx, 'Upstream API');
   const method = (asString(cfg.method) ?? 'GET').toUpperCase();
   const upstreamPath = asString(cfg.upstreamPath) ?? '';
-  const forwardQuery = Array.isArray(cfg.forwardQuery) ? (cfg.forwardQuery as unknown[]).filter((q): q is string => typeof q === 'string') : [];
-  const forwardHeaders = Array.isArray(cfg.forwardHeaders) ? (cfg.forwardHeaders as unknown[]).filter((h): h is string => typeof h === 'string') : [];
+  const forwardQuery = Array.isArray(cfg.forwardQuery) ? cfg.forwardQuery.filter((q) => typeof q === 'string') : [];
+  const forwardHeaders = Array.isArray(cfg.forwardHeaders) ? cfg.forwardHeaders.filter((h) => typeof h === 'string') : [];
 
   if (ctx.request.method !== method) {
     return { response: errorResponse('METHOD_NOT_ALLOWED', `Use ${method} for this route`, 405, ctx.request, ctx.allowed, ctx.requestId) };
@@ -226,7 +289,7 @@ async function genericRestHandle(ctx: ProviderContext, cfg: Cfg): Promise<Provid
   }
 
   // Attach the configured upstream credential from env.
-  const auth = (cfg.auth ?? { type: 'none' }) as Record<string, unknown>;
+  const auth = (cfg.auth ?? { type: 'none' });
   const authType = asString(auth.type) ?? 'none';
   const secretName = asString(auth.secretName);
   const secret = secretName ? getSecret(ctx.env, secretName) : undefined;
@@ -235,7 +298,7 @@ async function genericRestHandle(ctx: ProviderContext, cfg: Cfg): Promise<Provid
   else if (authType === 'header' && secret) headers.set(asString(auth.name) ?? 'X-API-Key', secret);
   else if (authType === 'basic' && secret) headers.set('Authorization', `Basic ${btoa(secret)}`);
 
-  let bodyInit: string | undefined;
+  let bodyInit;
   if (method !== 'GET' && method !== 'HEAD') {
     try {
       const parsed = await readJsonBody(ctx.request, MAX_BODY);
@@ -265,10 +328,11 @@ async function genericRestHandle(ctx: ProviderContext, cfg: Cfg): Promise<Provid
 /* IP / GEO                                                            */
 /* ------------------------------------------------------------------ */
 
-async function ipGeoHandle(ctx: ProviderContext, cfg: Cfg): Promise<ProviderResult> {
+/** @param {ProviderContext} ctx @param {Cfg} cfg @returns {Promise<ProviderResult>} */
+async function ipGeoHandle(ctx, cfg) {
   const endpoint = (asString(cfg.endpoint) ?? 'https://ipinfo.io').replace(/\/$/, '');
   const pathSuffix = asString(cfg.pathSuffix) ?? '/json';
-  const auth = (cfg.auth ?? { type: 'none' }) as Record<string, unknown>;
+  const auth = (cfg.auth ?? { type: 'none' });
   const authType = asString(auth.type) ?? 'none';
 
   const incoming = new URL(ctx.request.url);
@@ -304,11 +368,12 @@ async function ipGeoHandle(ctx: ProviderContext, cfg: Cfg): Promise<ProviderResu
 /* Indexer (SIP-01 / generic)                                          */
 /* ------------------------------------------------------------------ */
 
-async function indexerHandle(ctx: ProviderContext, cfg: Cfg): Promise<ProviderResult> {
+/** @param {ProviderContext} ctx @param {Cfg} cfg @returns {Promise<ProviderResult>} */
+async function indexerHandle(ctx, cfg) {
   const endpoint = asString(cfg.endpoint);
   if (!endpoint) return unavailable(ctx, 'Indexer');
   const searchPath = asString(cfg.searchPath) ?? '/search';
-  const auth = (cfg.auth ?? { type: 'none' }) as Record<string, unknown>;
+  const auth = (cfg.auth ?? { type: 'none' });
 
   const incoming = new URL(ctx.request.url);
   const q = incoming.searchParams.get('q') ?? incoming.searchParams.get('query') ?? '';
@@ -323,7 +388,8 @@ async function indexerHandle(ctx: ProviderContext, cfg: Cfg): Promise<ProviderRe
 
   const headers = new Headers({ Accept: 'application/json' });
   if (asString(auth.type) === 'bearer') {
-    const secret = asString(auth.secretName) ? getSecret(ctx.env, asString(auth.secretName)!) : undefined;
+    const name = asString(auth.secretName);
+    const secret = name ? getSecret(ctx.env, name) : undefined;
     if (!secret) return unavailable(ctx, 'Indexer credential');
     headers.set('Authorization', `Bearer ${secret}`);
   }
@@ -341,21 +407,22 @@ async function indexerHandle(ctx: ProviderContext, cfg: Cfg): Promise<ProviderRe
 /* Crawler (SSRF-hardened)                                             */
 /* ------------------------------------------------------------------ */
 
-async function crawlerHandle(ctx: ProviderContext, cfg: Cfg): Promise<ProviderResult> {
+/** @param {ProviderContext} ctx @param {Cfg} cfg @returns {Promise<ProviderResult>} */
+async function crawlerHandle(ctx, cfg) {
   const endpoint = asString(cfg.endpoint);
   if (!endpoint) return unavailable(ctx, 'Crawler');
   const crawlPath = asString(cfg.crawlPath) ?? '/crawl';
   const maxPages = typeof cfg.maxPages === 'number' ? cfg.maxPages : 100;
-  const allowedDomains = Array.isArray(cfg.allowedDomains) ? (cfg.allowedDomains as unknown[]).filter((d): d is string => typeof d === 'string') : [];
-  const auth = (cfg.auth ?? { type: 'none' }) as Record<string, unknown>;
+  const allowedDomains = Array.isArray(cfg.allowedDomains) ? cfg.allowedDomains.filter((d) => typeof d === 'string') : [];
+  const auth = (cfg.auth ?? { type: 'none' });
 
-  let body: unknown;
+  let body;
   try {
     body = await readJsonBody(ctx.request, MAX_BODY);
   } catch (e) {
     return { response: errorResponse(e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE' ? 'PAYLOAD_TOO_LARGE' : 'INVALID_REQUEST', 'Body must be JSON', 400, ctx.request, ctx.allowed, ctx.requestId) };
   }
-  const raw = (body ?? {}) as Record<string, unknown>;
+  const raw = (body ?? {});
   const target = asString(raw.url)?.trim();
   if (!target) return { response: errorResponse('INVALID_REQUEST', 'url is required', 400, ctx.request, ctx.allowed, ctx.requestId) };
 
@@ -378,7 +445,8 @@ async function crawlerHandle(ctx: ProviderContext, cfg: Cfg): Promise<ProviderRe
 
   const headers = new Headers({ 'Content-Type': 'application/json', Accept: 'application/json' });
   if (asString(auth.type) === 'bearer') {
-    const secret = asString(auth.secretName) ? getSecret(ctx.env, asString(auth.secretName)!) : undefined;
+    const name = asString(auth.secretName);
+    const secret = name ? getSecret(ctx.env, name) : undefined;
     if (!secret) return unavailable(ctx, 'Crawler credential');
     headers.set('Authorization', `Bearer ${secret}`);
   }
@@ -402,7 +470,8 @@ async function crawlerHandle(ctx: ProviderContext, cfg: Cfg): Promise<ProviderRe
 /* Tor gateway (Worker -> authenticated HTTPS gateway -> SOCKS/Tor)    */
 /* ------------------------------------------------------------------ */
 
-async function torGatewayHandle(ctx: ProviderContext, cfg: Cfg): Promise<ProviderResult> {
+/** @param {ProviderContext} ctx @param {Cfg} cfg @returns {Promise<ProviderResult>} */
+async function torGatewayHandle(ctx, cfg) {
   const endpoint = asString(cfg.endpoint);
   if (!endpoint) return unavailable(ctx, 'Tor gateway');
   const fetchPath = asString(cfg.fetchPath) ?? '/v1/fetch';
@@ -410,13 +479,13 @@ async function torGatewayHandle(ctx: ProviderContext, cfg: Cfg): Promise<Provide
   const token = getSecret(ctx.env, asString(cfg.secretName) ?? 'TOR_GATEWAY_TOKEN');
   if (!token) return unavailable(ctx, 'Tor gateway credential');
 
-  let body: unknown;
+  let body;
   try {
     body = await readJsonBody(ctx.request, MAX_BODY);
   } catch (e) {
     return { response: errorResponse(e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE' ? 'PAYLOAD_TOO_LARGE' : 'INVALID_REQUEST', 'Body must be JSON', 400, ctx.request, ctx.allowed, ctx.requestId) };
   }
-  const raw = (body ?? {}) as Record<string, unknown>;
+  const raw = (body ?? {});
   const target = asString(raw.url)?.trim();
   if (!target) return { response: errorResponse('INVALID_REQUEST', 'url is required', 400, ctx.request, ctx.allowed, ctx.requestId) };
 
@@ -455,11 +524,13 @@ async function torGatewayHandle(ctx: ProviderContext, cfg: Cfg): Promise<Provide
 /* Dispatcher                                                          */
 /* ------------------------------------------------------------------ */
 
-export async function dispatchProvider(
-  type: string,
-  ctx: ProviderContext,
-  cfg: Cfg,
-): Promise<ProviderResult> {
+/**
+ * @param {string} type
+ * @param {ProviderContext} ctx
+ * @param {Cfg} cfg
+ * @returns {Promise<ProviderResult>}
+ */
+export async function dispatchProvider(type, ctx, cfg) {
   switch (type) {
     case 'brave':
       return braveHandle(ctx, cfg);
@@ -485,33 +556,31 @@ export async function dispatchProvider(
 /* the deploy UI's live probe via the deployed worker).                */
 /* ------------------------------------------------------------------ */
 
-export interface HealthItem {
-  id: string;
-  ok: boolean;
-  detail: string;
-  latencyMs?: number;
-}
+/** @typedef {{ id: string, ok: boolean, detail: string, latencyMs?: number }} HealthItem */
 
-export async function healthCheckProvider(
-  id: string,
-  type: string,
-  cfg: Cfg,
-  env: WorkerEnv,
-): Promise<HealthItem> {
+/**
+ * @param {string} id
+ * @param {string} type
+ * @param {Cfg} cfg
+ * @param {Record<string, unknown>} env
+ * @returns {Promise<HealthItem>}
+ */
+export async function healthCheckProvider(id, type, cfg, env) {
   const started = Date.now();
-  const fail = (detail: string): HealthItem => ({ id, ok: false, detail, latencyMs: Date.now() - started });
+  /** @param {string} detail @returns {HealthItem} */
+  const fail = (detail) => ({ id, ok: false, detail, latencyMs: Date.now() - started });
 
   const secretName = asString(cfg.secretName)
-    ?? asString((cfg.auth as Record<string, unknown> | undefined)?.secretName);
+    ?? asString((cfg.auth && typeof cfg.auth === 'object') ? cfg.auth.secretName : undefined);
   const secret = secretName ? getSecret(env, secretName) : undefined;
-  const needsSecret = type !== 'generic-rest' || asString((cfg.auth as Cfg | undefined)?.type) !== 'none';
+  const needsSecret = type !== 'generic-rest' || asString(cfg.auth?.type) !== 'none';
   if (needsSecret && secretName && !secret) return fail(`secret ${secretName} is not set`);
 
   try {
     switch (type) {
       case 'brave': {
         const r = await fetch('https://api.search.brave.com/res/v1/web/search?q=test&count=1', {
-          headers: { 'X-Subscription-Token': secret! }, signal: AbortSignal.timeout(8000),
+          headers: { 'X-Subscription-Token': secret }, signal: AbortSignal.timeout(8000),
         });
         await r.body?.cancel().catch(() => undefined);
         return { id, ok: r.ok, detail: r.ok ? 'API key valid' : `HTTP ${r.status}`, latencyMs: Date.now() - started };
@@ -519,7 +588,7 @@ export async function healthCheckProvider(
       case 'openai': {
         const endpoint = (asString(cfg.endpoint) ?? 'https://api.openai.com/v1').replace(/\/$/, '');
         const r = await fetch(`${endpoint}/models`, {
-          headers: { Authorization: `Bearer ${secret!}` }, signal: AbortSignal.timeout(8000),
+          headers: { Authorization: `Bearer ${secret}` }, signal: AbortSignal.timeout(8000),
         });
         await r.body?.cancel().catch(() => undefined);
         return { id, ok: r.ok, detail: r.ok ? `API key valid (${asString(cfg.providerName) ?? 'provider'})` : `HTTP ${r.status}`, latencyMs: Date.now() - started };

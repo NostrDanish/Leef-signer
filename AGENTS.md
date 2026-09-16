@@ -1,6 +1,22 @@
+# LEEF Trader Signer
+
+A fork of [0xSigner](https://github.com/NostrDanish/0xsigner) that deploys the
+**AI analysis gateway for [LEEF Trader](https://github.com/NostrDanish/leef-trader)**.
+The wizard turns a form into a hardened Cloudflare Worker fronting PayPerQ
+(OpenAI-compatible): `PPQ_API_KEY` goes to the Worker secret store, the model
+(`deepseek/deepseek-v4-flash`, overridable via the `PPQ_MODEL` plain-text var) and
+the LEEF analysis system prompt are server-controlled, CORS is locked to the LEEF
+Trader origins, and `/api/ai` is rate-limited (20/min) with an 8s upstream timeout.
+The AI is an analyst, never the trading engine — it cannot sign, broadcast, or
+override deterministic risk controls. The generic 0xSigner provider machinery
+(search, generic REST, IP/geo, indexer, crawler, Tor) stays intact for future
+providers/keys. See `README.md` and `ARCHITECTURE.md`; the signer logic lives in
+`src/lib/signer/` (runtime is plain JS on purpose — Cloudflare does not
+transpile TypeScript on upload).
+
 # Project Overview
 
-This project is a Nostr client application built with React 19.x, TailwindCSS 4.x, Vite, shadcn/ui, and Nostrify.
+This project is built with React 19.x, TailwindCSS 4.x, Vite, shadcn/ui, and Nostrify.
 
 ## Technology Stack
 

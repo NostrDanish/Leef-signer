@@ -72,11 +72,24 @@ export interface VerifyResult {
 export async function verifyCredentials(cred: CloudflareCredentials): Promise<VerifyResult> {
   const notes: string[] = [];
 
-  // 1. Token validity.
-  const token = await cf<{ id: string; status: string }>(cred, '/user/tokens/verify');
-  const tokenStatus = token.status;
-  const tokenValid = tokenStatus === 'active';
-  if (!tokenValid) notes.push(`Token status is "${tokenStatus}" (expected "active")`);
+  // 1. Token validity. Account-scoped tokens cannot call /user/tokens/verify
+  //    (it is a user-level endpoint), so try the account-scoped verify first.
+  let tokenValid = false;
+  let tokenStatus = 'unknown';
+  try {
+    const t = await cf<{ id: string; status: string }>(cred, `/accounts/${cred.accountId}/tokens/verify`);
+    tokenStatus = t.status;
+    tokenValid = t.status === 'active';
+  } catch {
+    try {
+      const t = await cf<{ id: string; status: string }>(cred, '/user/tokens/verify');
+      tokenStatus = t.status;
+      tokenValid = t.status === 'active';
+    } catch {
+      notes.push('Token verify endpoints unavailable for this token type — relying on the permission probes below');
+    }
+  }
+  if (tokenStatus !== 'unknown' && !tokenValid) notes.push(`Token status is "${tokenStatus}" (expected "active")`);
 
   // 2. Account readability.
   let accountName = '';
@@ -89,10 +102,19 @@ export async function verifyCredentials(cred: CloudflareCredentials): Promise<Ve
   }
 
   // 3. Workers write permission — attempt a harmless read of the scripts list.
+  let workersOk = true;
   try {
     await cf<unknown>(cred, `/accounts/${cred.accountId}/workers/scripts?per_page=1`);
   } catch {
+    workersOk = false;
     notes.push('Token lacks "Workers Scripts:Read" — deployments will fail');
+  }
+
+  // If the token couldn't be verified directly but proves it can read the
+  // account and the workers scripts list, it is good enough to deploy with.
+  if (!tokenValid && workersOk && accountName) {
+    tokenValid = true;
+    notes.push('Account-scoped token confirmed via permission probes');
   }
 
   return { tokenValid, tokenStatus, accountName, notes };
@@ -114,13 +136,22 @@ export async function uploadWorker(
   scriptName: string,
   source: string,
   compatibilityDate: string,
+  vars?: Record<string, string>,
 ): Promise<void> {
-  const metadata = {
+  // Non-secret plain-text bindings (e.g. a model override var like PPQ_MODEL).
+  const bindings = Object.entries(vars ?? {})
+    .filter(([name, value]) => /^[A-Z][A-Z0-9_]*$/.test(name) && value.length > 0)
+    .map(([name, text]) => ({ name, type: 'plain_text', text }));
+  const metadata: Record<string, unknown> = {
     main_module: 'worker.mjs',
     compatibility_date: compatibilityDate,
   };
+  if (bindings.length > 0) metadata.bindings = bindings;
+
   const form = new FormData();
   form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+  // The generated source is plain JavaScript (see runtime/*.js) — Cloudflare
+  // does not transpile TypeScript on upload.
   form.append('worker.mjs', new Blob([source], { type: 'application/javascript+module' }), 'worker.mjs');
 
   await cf<unknown>(cred, `/accounts/${cred.accountId}/workers/scripts/${encodeURIComponent(scriptName)}`, {
@@ -157,7 +188,19 @@ export async function enableWorkersDev(
     const s = await cf<{ subdomain: string }>(cred, `/accounts/${cred.accountId}/workers/subdomain`);
     subdomain = s.subdomain;
   } catch {
-    subdomain = null;
+    // No workers.dev subdomain yet — try to claim one derived from the
+    // script name. (If the token lacks the scope, the deploy still succeeds;
+    // the user can claim a subdomain in the dashboard later.)
+    const claim = scriptName.toLowerCase().replace(/[^a-z0-9-]/g, '').replace(/^(?:-+)|(?:-+)$/g, '') || 'edge-signer';
+    try {
+      const s = await cf<{ subdomain: string }>(cred, `/accounts/${cred.accountId}/workers/subdomain`, {
+        method: 'PUT',
+        body: JSON.stringify({ subdomain: claim }),
+      });
+      subdomain = s.subdomain;
+    } catch {
+      subdomain = null;
+    }
   }
 
   // Enable the script on workers.dev.
@@ -174,7 +217,7 @@ export async function enableWorkersDev(
   return subdomain ? `${scriptName}.${subdomain}.workers.dev` : null;
 }
 
-/** Full deploy: upload source, push secrets, enable workers.dev. */
+/** Full deploy: upload source (+ non-secret vars), push secrets, enable workers.dev. */
 export async function deployWorker(
   cred: CloudflareCredentials,
   scriptName: string,
@@ -182,9 +225,10 @@ export async function deployWorker(
   secrets: Record<string, string>,
   compatibilityDate: string,
   onProgress?: (step: string) => void,
+  vars?: Record<string, string>,
 ): Promise<DeployResult> {
   onProgress?.('Uploading worker');
-  await uploadWorker(cred, scriptName, source, compatibilityDate);
+  await uploadWorker(cred, scriptName, source, compatibilityDate, vars);
 
   const entries = Object.entries(secrets).filter(([, v]) => v.length > 0);
   for (let i = 0; i < entries.length; i++) {

@@ -42,9 +42,9 @@ const PRINCIPLES = [
 
 const Index = () => {
   useSeoMeta({
-    title: 'Universal Edge Signer — Deploy your own Cloudflare API gateway',
+    title: 'LEEF Trader Signer — Deploy the LEEF Trader AI gateway',
     description:
-      'Bring your own Cloudflare account and API keys. Deploy a secure, rate-limited edge signer for AI, search, indexers, crawlers, Tor and any REST API — in one click.',
+      'Bring your own Cloudflare account and API keys. Deploy the hardened, rate-limited edge signer that gives LEEF Trader an optional AI analysis layer — keys stay server-side, the trading engine stays deterministic.',
   });
 
   return (
@@ -54,11 +54,11 @@ const Index = () => {
         <div className="container flex h-16 items-center justify-between">
           <div className="flex items-center gap-2">
             <Lock className="h-5 w-5 text-primary" />
-            <span className="font-bold tracking-tight">Universal Edge Signer</span>
+            <span className="font-bold tracking-tight">LEEF Trader Signer</span>
           </div>
           <Button asChild>
             <Link to="/deploy">
-              Deploy a Signer <ArrowRight className="ml-1.5 h-4 w-4" />
+              Deploy the Signer <ArrowRight className="ml-1.5 h-4 w-4" />
             </Link>
           </Button>
         </div>
@@ -69,7 +69,7 @@ const Index = () => {
         <div className="mx-auto max-w-3xl space-y-6">
           <div className="inline-flex items-center gap-2 rounded-full border bg-muted/50 px-3 py-1 text-xs text-muted-foreground">
             <Layers className="h-3.5 w-3.5" />
-            One runtime. Any API.
+            A 0xSigner fork, tuned for LEEF Trader
           </div>
           <h1 className="text-4xl sm:text-6xl font-bold tracking-tight leading-[1.05]">
             Protect your API keys.
@@ -79,14 +79,14 @@ const Index = () => {
             </span>
           </h1>
           <p className="text-lg sm:text-xl text-muted-foreground max-w-2xl mx-auto">
-            Bring your own Cloudflare account and API keys. We generate a hardened, rate-limited
-            edge signer and deploy it straight to your account — no vault, no middleman, no
-            centralized proxy.
+            Deploy the Cloudflare Worker that fronts LEEF Trader's AI analysis layer (PayPerQ
+            OpenAI-compatible). The PPQ key lives only as a Worker Secret; the AI can analyze but
+            never sign, broadcast, or trade — the deterministic engine stays authoritative.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
             <Button size="lg" asChild className="w-full sm:w-auto">
               <Link to="/deploy">
-                Deploy a Signer <ArrowRight className="ml-1.5 h-4 w-4" />
+                Deploy the Signer <ArrowRight className="ml-1.5 h-4 w-4" />
               </Link>
             </Button>
             <Button size="lg" variant="outline" asChild className="w-full sm:w-auto">
@@ -170,8 +170,9 @@ const Index = () => {
         <div className="mx-auto max-w-2xl space-y-5">
           <h2 className="text-3xl font-bold tracking-tight">Your keys. Your worker. Your rules.</h2>
           <p className="text-muted-foreground">
-            SAVEDD, Dsearch, SIP-01, Crawlstr, Indexstr, Tor and 0xPrivacy infrastructure all run on
-            the same machinery. Deploy yours.
+            Built for <a href="https://leef-trader.vercel.app" target="_blank" rel="noreferrer" className="underline hover:text-foreground">LEEF Trader</a> —
+            the AI gateway is an optional analyst; the deterministic trading engine stays authoritative.
+            The same machinery can front any other provider you add later.
           </p>
           <Button size="lg" asChild>
             <Link to="/deploy">
@@ -183,7 +184,7 @@ const Index = () => {
 
       <footer className="border-t">
         <div className="container py-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-sm text-muted-foreground">
-          <span>Universal Edge Signer — deployable API infrastructure.</span>
+          <span>LEEF Trader Signer — deployable API infrastructure (a 0xSigner fork).</span>
           <a href="https://shakespeare.diy" target="_blank" rel="noreferrer" className="hover:text-foreground transition-colors">
             Vibed with Shakespeare
           </a>

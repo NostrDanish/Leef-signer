@@ -54,6 +54,11 @@ function OpenAIFields({
           <NumberInput value={cfg.maxTokens} min={1} max={128000} onChange={(n) => onChange({ ...cfg, maxTokens: n })} />
         </Field>
       </div>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <Field label="Upstream timeout (ms)" hint="Keep it short — a slow model must never block your callers.">
+          <NumberInput value={cfg.timeoutMs} min={1000} max={120000} onChange={(n) => onChange({ ...cfg, timeoutMs: n })} />
+        </Field>
+      </div>
       <Field
         label="System prompt (server-side)"
         hint="Injected on every request. Clients can never override it."

@@ -29,14 +29,14 @@ export function StepApplication({ wizard }: { wizard: WizardState }) {
       />
 
       <div className="space-y-5">
-        <Field label="Application name" hint='e.g. "SAVEDD", "Dsearch", "My Game"'>
+        <Field label="Application name" hint='e.g. "LEEF Trader AI", "My Game"'>
           <Input
             value={manifest.app}
             onChange={(e) => {
               const app = e.target.value;
               updateManifest({ app, workerName: toWorkerName(app) });
             }}
-            placeholder="SAVEDD"
+            placeholder="LEEF Trader AI"
             autoFocus
           />
         </Field>
@@ -57,7 +57,7 @@ export function StepApplication({ wizard }: { wizard: WizardState }) {
                 },
               });
             }}
-            placeholder="https://savedd.com"
+            placeholder="https://leef-trader.vercel.app"
             inputMode="url"
           />
         </Field>

@@ -14,7 +14,7 @@ import {
   type SignerManifest,
   type TemplateId,
 } from './manifest';
-import { manifestForTemplate } from './templates';
+import { leefTraderManifest, manifestForTemplate } from './templates';
 
 export type WizardStep =
   | 'application'
@@ -58,7 +58,9 @@ export interface WizardState {
 }
 
 function initialManifest(): SignerManifest {
-  return manifestForTemplate('ai-search', 'My App', 'my-signer');
+  // This fork ships for LEEF Trader: open the wizard with the LEEF Trader AI
+  // preset preloaded. Every generic template remains selectable afterwards.
+  return leefTraderManifest('leef-trader-ai');
 }
 
 export function useWizard(): WizardState {

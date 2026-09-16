@@ -1,4 +1,4 @@
-# Universal Edge Signer — Architecture
+# LEEF Trader Signer — Architecture
 
 > The machine that creates **your** API proxy — not a hosted proxy everyone shares.
 
@@ -6,11 +6,13 @@ Bring your own Cloudflare account. Bring your own API keys. Deploy your own edge
 gateway. The platform never routes production traffic and never becomes a
 centralized API-key vault.
 
-This project is the generic extraction of the signer that powers
-[SAVEDD](https://github.com/NostrDanish/Savedd). SAVEDD's `worker.ts` was a
-single-purpose AI + Brave proxy; here those proven patterns (secret-injection,
-payload whitelisting, sanitized errors, NIP-98-style auth, CORS lockdown) are
-generalized into a **config-driven runtime** with a **provider-adapter** model.
+This project is a fork of [0xSigner](https://github.com/NostrDanish/0xsigner), tuned
+for [LEEF Trader](https://github.com/NostrDanish/leef-trader): it ships a preloaded
+preset that deploys the **LEEF Trader AI analysis gateway** (OpenAI-compatible →
+PayPerQ, server-side system prompt, ZDR routing, 8s timeout, 20 req/min). The
+generic machinery (provider adapters, templates, CORS lockdown, secret injection)
+is fully preserved, so additional providers and keys can be added to the same
+worker later.
 
 ---
 
@@ -51,22 +53,30 @@ deployment is held only in React state for the lifetime of the tab.
 
 ```
 src/lib/signer/
-├── manifest.ts            # zod schema for the non-secret manifest; requiredSecrets()
-├── templates.ts           # preset manifests per template + the SAVEDD preset
+├── manifest.ts            # zod schema for the non-secret manifest; requiredSecrets(); plainTextVars()
+├── templates.ts           # preset manifests per template + the LEEF Trader preset
 ├── cloudflare.ts          # browser-side Cloudflare REST client (verify/upload/secrets/subdomain/health)
 ├── useWizard.ts           # wizard state (token + secrets live only here, in memory)
 └── runtime/
-    ├── core.ts            # CORS, SSRF guard, error model, rate limiter, public auth
-    ├── providers.ts       # one adapter per ProviderType (handle + healthCheck)
-    ├── entry.ts           # the Worker's default-export fetch handler
+    ├── core.js            # CORS, SSRF guard, error model, rate limiter, public auth
+    ├── providers.js       # one adapter per ProviderType (handle + healthCheck)
+    ├── entry.js           # the Worker's default-export fetch handler
     └── generator.ts       # assembles core+providers+entry+manifest into ONE module
 ```
 
-The `runtime/*` files are ordinary, type-checked TS modules, but written to be
-**bundle-safe**: their only cross-file references are exported symbols, so
-`generator.ts` strips `import`/`export` syntax and concatenates them into a
-single self-contained Worker module, injecting the manifest as a literal. The
-Worker is uploaded module-syntax via `multipart/form-data` (`main_module`).
+The `runtime/*` files are written to be **bundle-safe**: their only cross-file
+references are exported symbols, so `generator.ts` strips `import`/`export`
+syntax and concatenates them into a single self-contained Worker module,
+injecting the manifest as a literal. They are authored as **plain JavaScript**
+(not TypeScript) because the Cloudflare script-upload API does not transpile
+TypeScript — the generated worker must be valid ECMAScript byte-for-byte, and
+the file you read in the repo is exactly what runs at the edge. The Worker is
+uploaded module-syntax via `multipart/form-data` (`main_module`).
+
+Non-secret operator tunables that should be changeable without a redeploy (e.g.
+`PPQ_MODEL` for the AI provider's model + routing suffix) are uploaded as
+`plain_text` Worker **bindings** next to the module; the runtime reads
+`env.<MODEL_VAR>` first and falls back to the manifest model.
 
 ---
 
@@ -136,7 +146,8 @@ Three access levels (per the design's "really important part"):
 ## Phased roadmap
 
 - **Phase 1 (this repo):** generic runtime, Cloudflare deploy, secrets, CORS,
-  rate limiting, generic-rest, Brave, OpenAI. — **SAVEDD is the first consumer.**
+  rate limiting, generic-rest, Brave, OpenAI. — **LEEF Trader is the first consumer**
+  (AI analysis gateway preset: PayPerQ + ZDR + server-side prompt).
 - **Phase 2:** IP/GEO, indexer, crawler, Nostr (NIP-50/77/98 binding with
   canonical public-origin handling).
 - **Phase 3:** Tor gateway node reference implementation, game API, Durable

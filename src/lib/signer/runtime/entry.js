@@ -1,37 +1,33 @@
 /**
  * Worker entry — the single default-export fetch handler. Serialized into
- * the generated module. The MANIFEST placeholder is replaced with the
- * serialized (non-secret) manifest at generation time.
+ * the generated module. The MANIFEST const is injected by generator.ts
+ * (as a JSON literal) directly before this section.
+ *
+ * Plain JavaScript on purpose (see core.js): the generated worker must be
+ * valid ECMAScript — Cloudflare does not transpile TypeScript on upload.
  */
 
-import {
-  applyCors,
-  checkPublicAuth,
-  errorResponse,
-  handlePreflight,
-  jsonResponse,
-  makeRequestId,
-  rateLimit,
-  type RuntimeManifest,
-  type WorkerEnv,
-} from './core';
-import { dispatchProvider, healthCheckProvider, type HealthItem } from './providers';
+/* global MANIFEST, makeRequestId, handlePreflight, jsonResponse, errorResponse, applyCors, checkPublicAuth, rateLimit, dispatchProvider, healthCheckProvider */
+/* (symbols above are provided by core.js / providers.js / the manifest,   */
+/*  concatenated by generator.ts)                                          */
 
-// Injected by generator.ts (string replace). Keep this exact marker.
-declare const MANIFEST: RuntimeManifest;
-
-function publicStatus(env: WorkerEnv): Record<string, unknown> {
-  const providers: Record<string, unknown> = {};
+/**
+ * Non-secret status — never leaks secrets, only which bindings are set.
+ * @param {Record<string, unknown>} env
+ * @returns {Record<string, unknown>}
+ */
+function publicStatus(env) {
+  const providers = {};
   for (const [id, cfg] of Object.entries(MANIFEST.providers)) {
-    const c = cfg as Record<string, unknown>;
+    const c = cfg;
     const secretName =
       (typeof c.secretName === 'string' ? c.secretName : undefined) ??
-      (typeof (c.auth as Record<string, unknown> | undefined)?.secretName === 'string'
-        ? ((c.auth as Record<string, unknown>).secretName as string)
+      (c.auth && typeof c.auth === 'object' && typeof c.auth.secretName === 'string'
+        ? c.auth.secretName
         : undefined);
     providers[id] = {
       type: c.type,
-      configured: secretName ? typeof env[secretName] === 'string' && (env[secretName] as string).length > 0 : true,
+      configured: secretName ? typeof env[secretName] === 'string' && env[secretName].length > 0 : true,
     };
   }
   return {
@@ -43,7 +39,12 @@ function publicStatus(env: WorkerEnv): Record<string, unknown> {
 }
 
 export default {
-  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+  /**
+   * @param {Request} request
+   * @param {Record<string, unknown>} env
+   * @returns {Promise<Response>}
+   */
+  async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
     const allowed = MANIFEST.security.allowedOrigins;
@@ -61,9 +62,9 @@ export default {
 
       // Built-in health endpoint — probes each provider's reachability.
       if (path === '/api/health' && request.method === 'GET') {
-        const checks: HealthItem[] = [];
+        const checks = [];
         for (const [id, cfg] of Object.entries(MANIFEST.providers)) {
-          const c = cfg as Record<string, unknown>;
+          const c = cfg;
           checks.push(await healthCheckProvider(id, String(c.type), c, env));
         }
         const ok = checks.every((c) => c.ok);

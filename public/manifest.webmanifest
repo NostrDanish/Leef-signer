@@ -1,7 +1,7 @@
 {
-  "name": "Universal Edge Signer",
-  "short_name": "Edge Signer",
-  "description": "Deploy your own Cloudflare Worker API gateway — bring your own account and API keys.",
+  "name": "LEEF Trader Signer",
+  "short_name": "LEEF Signer",
+  "description": "Deploy the LEEF Trader AI gateway — bring your own Cloudflare account and PPQ API key.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0b0d12",

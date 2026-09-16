@@ -5,66 +5,50 @@
  * IMPORTANT: this file is serialized verbatim into the worker by
  * `generator.ts`. It must therefore:
  *   - have NO imports,
- *   - use NO Node/DOM-only APIs (Worker runtime only),
- *   - avoid `any` (it is type-checked with the rest of the project).
+ *   - use NO Node/DOM-only APIs (Worker runtime only).
  *
- * The `SignerManifest` type is structurally duplicated here (rather than
- * imported) so the generated worker stays a single self-contained module.
+ * It is authored as **plain JavaScript** (not TypeScript) on purpose: the
+ * Cloudflare script-upload API does not transpile TypeScript, so the generated
+ * worker must be valid ECMAScript byte-for-byte. Types are documented with
+ * JSDoc instead.
+ *
+ * @typedef {Object} RateRule
+ * @property {'ip'|'api-key'|'header'|'nostr-pubkey'} keyBy
+ * @property {string} [headerName]
+ * @property {number} requestsPerMinute
+ *
+ * @typedef {Object} RuntimeManifest
+ * @property {'1'} version
+ * @property {string} app
+ * @property {{ allowedOrigins: string[], publicAuth: {type:'none'}|{type:'api-key',secretName:string}|{type:'nip98'}, internalMode: boolean }} security
+ * @property {{ default: RateRule, perRoute: Record<string, RateRule> }} limits
+ * @property {{ mode: 'standard'|'privacy'|'maximum' }} privacy
+ * @property {Record<string, string>} routes
+ * @property {Record<string, Record<string, unknown>>} providers
+ *
+ * @typedef {Record<string, unknown>} WorkerEnv
  */
-
-/* ------------------------------------------------------------------ */
-/* Minimal manifest typing (structural mirror of manifest.ts)         */
-/* ------------------------------------------------------------------ */
-
-export interface RuntimeManifest {
-  version: '1';
-  app: string;
-  security: {
-    allowedOrigins: string[];
-    publicAuth: { type: 'none' } | { type: 'api-key'; secretName: string } | { type: 'nip98' };
-    internalMode: boolean;
-  };
-  limits: {
-    default: RateRule;
-    perRoute: Record<string, RateRule>;
-  };
-  privacy: { mode: 'standard' | 'privacy' | 'maximum' };
-  routes: Record<string, string>;
-  providers: Record<string, Record<string, unknown>>;
-}
-
-export interface RateRule {
-  keyBy: 'ip' | 'api-key' | 'header' | 'nostr-pubkey';
-  headerName?: string;
-  requestsPerMinute: number;
-}
-
-export type WorkerEnv = Record<string, unknown>;
 
 /* ------------------------------------------------------------------ */
 /* Standard error model — never leak internals                        */
 /* ------------------------------------------------------------------ */
 
-export type ErrorCode =
-  | 'INVALID_REQUEST'
-  | 'UNAUTHORIZED'
-  | 'FORBIDDEN'
-  | 'RATE_LIMITED'
-  | 'PROVIDER_UNAVAILABLE'
-  | 'PROVIDER_TIMEOUT'
-  | 'UPSTREAM_ERROR'
-  | 'CONFIGURATION_ERROR'
-  | 'SSRF_BLOCKED'
-  | 'PAYLOAD_TOO_LARGE'
-  | 'METHOD_NOT_ALLOWED'
-  | 'NOT_FOUND'
-  | 'INTERNAL';
+/**
+ * @typedef {'INVALID_REQUEST'|'UNAUTHORIZED'|'FORBIDDEN'|'RATE_LIMITED'|'PROVIDER_UNAVAILABLE'|'PROVIDER_TIMEOUT'|'UPSTREAM_ERROR'|'CONFIGURATION_ERROR'|'SSRF_BLOCKED'|'PAYLOAD_TOO_LARGE'|'METHOD_NOT_ALLOWED'|'NOT_FOUND'|'INTERNAL'} ErrorCode
+ */
 
-export function errorBody(code: ErrorCode, message: string, requestId: string): string {
+/**
+ * @param {ErrorCode} code
+ * @param {string} message
+ * @param {string} requestId
+ * @returns {string}
+ */
+export function errorBody(code, message, requestId) {
   return JSON.stringify({ error: { code, message, requestId } });
 }
 
-export function makeRequestId(): string {
+/** @returns {string} */
+export function makeRequestId() {
   const bytes = new Uint8Array(8);
   crypto.getRandomValues(bytes);
   let out = '';
@@ -76,14 +60,24 @@ export function makeRequestId(): string {
 /* CORS — reflect allowlisted origins only, never "*" unless public   */
 /* ------------------------------------------------------------------ */
 
-export function corsAllowOrigin(request: Request, allowed: string[]): string | null {
+/**
+ * @param {Request} request
+ * @param {string[]} allowed
+ * @returns {string | null}
+ */
+export function corsAllowOrigin(request, allowed) {
   const origin = request.headers.get('Origin');
   if (!origin) return null; // same-origin / non-browser
   if (allowed.includes('*')) return '*';
   return allowed.includes(origin) ? origin : null;
 }
 
-export function applyCors(headers: Headers, request: Request, allowed: string[]): void {
+/**
+ * @param {Headers} headers
+ * @param {Request} request
+ * @param {string[]} allowed
+ */
+export function applyCors(headers, request, allowed) {
   const allow = corsAllowOrigin(request, allowed);
   if (allow) {
     headers.set('Access-Control-Allow-Origin', allow);
@@ -91,7 +85,12 @@ export function applyCors(headers: Headers, request: Request, allowed: string[])
   }
 }
 
-export function handlePreflight(request: Request, allowed: string[]): Response {
+/**
+ * @param {Request} request
+ * @param {string[]} allowed
+ * @returns {Response}
+ */
+export function handlePreflight(request, allowed) {
   const allow = corsAllowOrigin(request, allowed);
   if (!allow) return new Response(null, { status: 403 });
   return new Response(null, {
@@ -106,12 +105,14 @@ export function handlePreflight(request: Request, allowed: string[]): Response {
   });
 }
 
-export function jsonResponse(
-  data: unknown,
-  status: number,
-  request: Request,
-  allowed: string[],
-): Response {
+/**
+ * @param {unknown} data
+ * @param {number} status
+ * @param {Request} request
+ * @param {string[]} allowed
+ * @returns {Response}
+ */
+export function jsonResponse(data, status, request, allowed) {
   const headers = new Headers({
     'Content-Type': 'application/json',
     'Cache-Control': 'no-store',
@@ -120,15 +121,17 @@ export function jsonResponse(
   return new Response(JSON.stringify(data), { status, headers });
 }
 
-export function errorResponse(
-  code: ErrorCode,
-  message: string,
-  status: number,
-  request: Request,
-  allowed: string[],
-  requestId: string,
-  retryAfterSeconds?: number,
-): Response {
+/**
+ * @param {ErrorCode} code
+ * @param {string} message
+ * @param {number} status
+ * @param {Request} request
+ * @param {string[]} allowed
+ * @param {string} requestId
+ * @param {number} [retryAfterSeconds]
+ * @returns {Response}
+ */
+export function errorResponse(code, message, status, request, allowed, requestId, retryAfterSeconds) {
   const headers = new Headers({
     'Content-Type': 'application/json',
     'Cache-Control': 'no-store',
@@ -142,11 +145,13 @@ export function errorResponse(
 /* Public gateway auth (distinct from upstream provider secrets)      */
 /* ------------------------------------------------------------------ */
 
-export function checkPublicAuth(
-  request: Request,
-  manifest: RuntimeManifest,
-  env: WorkerEnv,
-): boolean {
+/**
+ * @param {Request} request
+ * @param {RuntimeManifest} manifest
+ * @param {WorkerEnv} env
+ * @returns {boolean}
+ */
+export function checkPublicAuth(request, manifest, env) {
   const auth = manifest.security.publicAuth;
   if (auth.type === 'none') return true;
   if (auth.type === 'nip98') return true; // structural NIP-98 check is per-route; presence-only here
@@ -162,9 +167,15 @@ export function checkPublicAuth(
 /* Rate limiting (best-effort per isolate; upgrade path: CF binding)  */
 /* ------------------------------------------------------------------ */
 
-const buckets = new Map<string, { count: number; resetAt: number }>();
+/** @type {Map<string, { count: number, resetAt: number }>} */
+const buckets = new Map();
 
-export function identityKey(request: Request, rule: RateRule): string {
+/**
+ * @param {Request} request
+ * @param {RateRule} rule
+ * @returns {string}
+ */
+export function identityKey(request, rule) {
   switch (rule.keyBy) {
     case 'api-key':
       return `k:${request.headers.get('X-API-Key') ?? request.headers.get('Authorization') ?? 'anon'}`;
@@ -178,8 +189,13 @@ export function identityKey(request: Request, rule: RateRule): string {
   }
 }
 
-/** Returns seconds until reset if limited, else 0. */
-export function rateLimit(request: Request, rule: RateRule, routePath: string): number {
+/**
+ * @param {Request} request
+ * @param {RateRule} rule
+ * @param {string} routePath
+ * @returns {number} seconds until reset if limited, else 0.
+ */
+export function rateLimit(request, rule, routePath) {
   const key = `${routePath}|${identityKey(request, rule)}`;
   const now = Date.now();
   const entry = buckets.get(key);
@@ -199,7 +215,11 @@ export function rateLimit(request: Request, rule: RateRule, routePath: string): 
 /* SSRF guard — validate crawl/fetch targets                          */
 /* ------------------------------------------------------------------ */
 
-function ipv4ToInt(ip: string): number | null {
+/**
+ * @param {string} ip
+ * @returns {number | null}
+ */
+function ipv4ToInt(ip) {
   const parts = ip.split('.');
   if (parts.length !== 4) return null;
   let out = 0;
@@ -212,10 +232,19 @@ function ipv4ToInt(ip: string): number | null {
   return out >>> 0;
 }
 
-function isPrivateIpv4(ip: string): boolean {
+/**
+ * @param {string} ip
+ * @returns {boolean}
+ */
+function isPrivateIpv4(ip) {
   const n = ipv4ToInt(ip);
   if (n === null) return false;
-  const inRange = (base: string, bits: number): boolean => {
+  /**
+   * @param {string} base
+   * @param {number} bits
+   * @returns {boolean}
+   */
+  const inRange = (base, bits) => {
     const b = ipv4ToInt(base);
     if (b === null) return false;
     const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
@@ -239,18 +268,17 @@ const BLOCKED_HOSTNAMES = new Set([
   'metadata',
 ]);
 
-export interface SsrfCheck {
-  ok: boolean;
-  reason?: string;
-}
-
 /**
  * Validate a user-supplied target URL (crawler / tor fetch). Blocks
  * localhost, private/link-local IPs, and cloud-metadata hostnames unless
  * the deployment explicitly enables internalMode.
+ *
+ * @param {string} raw
+ * @param {boolean} internalMode
+ * @returns {{ ok: boolean, reason?: string }}
  */
-export function checkTargetUrl(raw: string, internalMode: boolean): SsrfCheck {
-  let url: URL;
+export function checkTargetUrl(raw, internalMode) {
+  let url;
   try {
     url = new URL(raw);
   } catch {
@@ -280,23 +308,37 @@ export function checkTargetUrl(raw: string, internalMode: boolean): SsrfCheck {
 /* Misc                                                                */
 /* ------------------------------------------------------------------ */
 
-export async function readJsonBody(request: Request, maxBytes: number): Promise<unknown> {
+/**
+ * @param {Request} request
+ * @param {number} maxBytes
+ * @returns {Promise<unknown>}
+ */
+export async function readJsonBody(request, maxBytes) {
   const text = await request.text();
   if (text.length > maxBytes) {
     throw new Error('PAYLOAD_TOO_LARGE');
   }
   try {
-    return JSON.parse(text) as unknown;
+    return JSON.parse(text);
   } catch {
     throw new Error('INVALID_JSON');
   }
 }
 
-export function asString(v: unknown): string | undefined {
+/**
+ * @param {unknown} v
+ * @returns {string | undefined}
+ */
+export function asString(v) {
   return typeof v === 'string' ? v : undefined;
 }
 
-export function getSecret(env: WorkerEnv, name: string): string | undefined {
+/**
+ * @param {WorkerEnv} env
+ * @param {string} name
+ * @returns {string | undefined}
+ */
+export function getSecret(env, name) {
   const v = env[name];
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }

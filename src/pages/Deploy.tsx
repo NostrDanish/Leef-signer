@@ -5,7 +5,7 @@ import { Wizard } from '@/components/deploy/Wizard';
 
 const Deploy = () => {
   useSeoMeta({
-    title: 'Deploy a Signer — Universal Edge Signer',
+    title: 'Deploy the Signer — LEEF Trader Signer',
     description: 'Configure, test, and deploy your own Cloudflare Worker API gateway in minutes.',
   });
 
@@ -15,11 +15,11 @@ const Deploy = () => {
         <div className="container flex h-16 items-center justify-between">
           <Link to="/" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
             <ArrowLeft className="h-4 w-4" />
-            <span className="hidden sm:inline">Universal Edge Signer</span>
+            <span className="hidden sm:inline">LEEF Trader Signer</span>
           </Link>
           <div className="flex items-center gap-2 text-sm font-medium">
             <Lock className="h-4 w-4 text-primary" />
-            Deploy a Signer
+            Deploy the Signer
           </div>
           <div className="w-24" />
         </div>

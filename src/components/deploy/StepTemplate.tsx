@@ -2,7 +2,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { StepHeader, StepFooter } from './common';
 import { TEMPLATES } from '@/lib/signer/templates';
-import { saveddManifest } from '@/lib/signer/templates';
+import { leefTraderManifest } from '@/lib/signer/templates';
 import type { WizardState } from '@/lib/signer/useWizard';
 
 export function StepTemplate({ wizard }: { wizard: WizardState }) {
@@ -12,8 +12,30 @@ export function StepTemplate({ wizard }: { wizard: WizardState }) {
     <div className="space-y-6">
       <StepHeader
         title="What are you protecting?"
-        sub="Pick a starting point. Each is the same runtime with a different set of provider adapters and routes."
+        sub="The LEEF Trader AI preset is preloaded. Pick a different starting point below if you're deploying for another application."
       />
+
+      <Card className="border-primary/50 bg-primary/5">
+        <CardContent className="py-4 flex items-center justify-between gap-4">
+          <div className="text-sm">
+            <span className="font-medium">LEEF Trader AI (recommended)</span>{' '}
+            <span className="text-muted-foreground">
+              PayPerQ OpenAI-compatible gateway, server-side analysis prompt, ZDR routing, 8s timeout,
+              locked to the LEEF Trader origins. The AI is an analyst — it can never sign or trade.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setManifest(leefTraderManifest(manifest.workerName));
+              setStep('providers');
+            }}
+            className="shrink-0 rounded-md bg-primary text-primary-foreground h-9 px-3 text-sm font-medium hover:bg-primary/90 transition-colors"
+          >
+            Load LEEF Trader preset
+          </button>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {TEMPLATES.map((t) => (
@@ -38,27 +60,6 @@ export function StepTemplate({ wizard }: { wizard: WizardState }) {
           </button>
         ))}
       </div>
-
-      <Card className="border-dashed">
-        <CardContent className="py-4 flex items-center justify-between gap-4">
-          <div className="text-sm">
-            <span className="font-medium">Migrating SAVEDD?</span>{' '}
-            <span className="text-muted-foreground">
-              Load the exact SAVEDD preset (Brave + OpenAI + Christian system prompt, savedd.com CORS).
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setManifest(saveddManifest(manifest.workerName));
-              setStep('providers');
-            }}
-            className="shrink-0 rounded-md border border-input bg-background h-9 px-3 text-sm font-medium hover:bg-accent transition-colors"
-          >
-            Load SAVEDD preset
-          </button>
-        </CardContent>
-      </Card>
 
       <StepFooter onBack={() => setStep('cloudflare')} onNext={() => setStep('providers')} />
     </div>

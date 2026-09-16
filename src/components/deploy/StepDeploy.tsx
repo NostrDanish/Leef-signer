@@ -5,6 +5,7 @@ import { StepHeader } from './common';
 import { useToast } from '@/hooks/useToast';
 import { buildWorkerSource, DEFAULT_COMPATIBILITY_DATE } from '@/lib/signer/runtime/generator';
 import { deployWorker, checkDeployedHealth, type LiveHealth } from '@/lib/signer/cloudflare';
+import { plainTextVars } from '@/lib/signer/manifest';
 import { useRequiredSecrets, type WizardState } from '@/lib/signer/useWizard';
 
 type Phase = 'idle' | 'deploying' | 'done' | 'error';
@@ -66,6 +67,7 @@ export function StepDeploy({ wizard }: { wizard: WizardState }) {
             mark(idx, 'active');
           }
         },
+        plainTextVars(manifest),
       );
       // Mark all create/secret lines ok.
       for (let i = 1; i <= 1 + required.length; i++) mark(i, 'ok');

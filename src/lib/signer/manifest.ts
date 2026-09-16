@@ -80,6 +80,27 @@ const openaiProvider = z.object({
   modelAllowlist: z.array(z.string().max(120)).default([]),
   streaming: z.boolean().default(false),
   secretName: secretName.default('OPENAI_API_KEY'),
+  /**
+   * Optional plain-text Worker var (e.g. PPQ_MODEL) that overrides `model`
+   * at runtime. Lets operators rotate models from the Cloudflare dashboard
+   * without redeploying. Non-secret; uploaded as a plain_text binding.
+   */
+  modelEnvName: z
+    .string()
+    .max(64)
+    .regex(/^[A-Z][A-Z0-9_]*$/, 'Use UPPER_SNAKE_CASE, e.g. PPQ_MODEL')
+    .optional(),
+  /** Token field the upstream expects (newer OpenAI models require max_completion_tokens). */
+  tokenParam: z.enum(['max_completion_tokens', 'max_tokens']).default('max_completion_tokens'),
+  /** Upstream timeout (ms). Keep short so AI can never block callers indefinitely. */
+  timeoutMs: z.number().int().min(1000).max(120_000).default(60_000),
+  /**
+   * Operator-controlled extra fields merged into the upstream request body
+   * (e.g. provider routing like `{ provider: { zdr: true } }`, or
+   * `response_format`). Server-controlled keys (model/messages/token cap)
+   * always win over these.
+   */
+  extraBody: z.record(z.string().max(60), z.unknown()).default({}),
 });
 
 const genericRestAuth = z.discriminatedUnion('type', [
@@ -320,3 +341,17 @@ export function requiredSecrets(manifest: SignerManifest): RequiredSecret[] {
 
 /** Extract just the secret values map the wizard collected, for pushing to CF. */
 export type SecretValues = Record<string, string>;
+
+/**
+ * Plain-text (non-secret) Worker vars derived from the manifest — currently
+ * the optional per-provider model override binding (e.g. PPQ_MODEL). These
+ * are uploaded as `plain_text` bindings alongside the Worker module; they
+ * contain no credentials.
+ */
+export function plainTextVars(manifest: SignerManifest): Record<string, string> {
+  const vars: Record<string, string> = {};
+  for (const p of Object.values(manifest.providers)) {
+    if (p.type === 'openai' && p.modelEnvName) vars[p.modelEnvName] = p.model;
+  }
+  return vars;
+}

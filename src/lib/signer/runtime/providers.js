@@ -252,7 +252,33 @@ async function openaiHandle(ctx, cfg) {
     await upstream.body?.cancel().catch(() => undefined);
     return { response: errorResponse('UPSTREAM_ERROR', upstreamMessage(upstream.status, 'AI provider'), upstream.status === 429 ? 429 : 502, ctx.request, ctx.allowed, ctx.requestId) };
   }
-  return { response: jsonResponse(await safeJson(upstream), 200, ctx.request, ctx.allowed) };
+
+  // The abort signal bounds the whole request INCLUDING the body read: a slow
+  // generation that trickles past the deadline must surface as a clean
+  // PROVIDER_TIMEOUT, never as a swallowed parse error.
+  let text;
+  try {
+    text = await upstream.text();
+  } catch (e) {
+    const timedOut = Boolean(e && typeof e === 'object' && (e.name === 'TimeoutError' || e.name === 'AbortError'));
+    return {
+      response: errorResponse(
+        timedOut ? 'PROVIDER_TIMEOUT' : 'UPSTREAM_ERROR',
+        timedOut ? 'AI provider timed out' : 'AI provider response was interrupted',
+        timedOut ? 504 : 502,
+        ctx.request,
+        ctx.allowed,
+        ctx.requestId,
+      ),
+    };
+  }
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { ok: false };
+  }
+  return { response: jsonResponse(data, 200, ctx.request, ctx.allowed) };
 }
 
 /* ------------------------------------------------------------------ */

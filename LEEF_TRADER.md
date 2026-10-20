@@ -102,13 +102,24 @@ The model is a plain-text Worker var, **`PPQ_MODEL`**, changeable from the
 Cloudflare dashboard (Workers → leef-trader-ai → Settings → Variables) without
 redeploying:
 
-- `deepseek/deepseek-v4-flash` — default
-- `deepseek/deepseek-v4-flash:floor` — cheapest-provider routing
-- `deepseek/deepseek-v4-flash:nitro` — highest-throughput routing
+- `openai/gpt-oss-20b` — default. Best cheap fit measured against the real
+  gateway workload (ZDR pool, JSON mode, ~1.6K-in/~0.8K-out per analysis):
+  9–13 s, ≈ $0.00015–0.00017 per call, exact schema adherence and correct
+  economic/infrastructure/control failure classification.
+- `ibm-granite/granite-4.0-h-micro` — ultra-budget runner-up: ≈ $0.00008 per
+  call (~half of gpt-oss), 14 s, full schema with slightly softer taxonomy
+  precision.
+- `deepseek/deepseek-v4-flash` — quality fallback (strictest grounding and
+  taxonomy, 1M ctx) but the slowest and priciest ZDR pool measured (≈ $0.00023;
+  regularly exceeded 30 s during pool incidents).
+- `inclusionai/ling-3.0-flash` — cheapest on paper but flaky and schema-loose;
+  smaller models (`mistral-nemo` and below) were observed to invent data — do
+  not downgrade below the ~20B class.
 
-Pick models from the live catalog (`GET https://api.ppq.ai/v1/models`); prefer
-`privacyLevel: "zdr"` entries to keep ZDR routing effective. Very small models
-were observed to invent data — do not downgrade below flash-class reasoning.
+Any model can also take a routing suffix (`:floor` cheapest provider, `:nitro`
+highest throughput). Pick replacements from the live catalog
+(`GET https://api.ppq.ai/v1/models`); prefer `privacyLevel: "zdr"` entries and
+models that advertise `response_format`/`structured_outputs`.
 
 **ZDR note:** `provider.zdr: true` constrains PPQ to its Zero-Data-Retention
 endpoints (per PPQ's API docs, ZDR is opt-in per request over the API — the

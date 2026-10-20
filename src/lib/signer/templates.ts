@@ -185,14 +185,21 @@ export function manifestForTemplate(
 
 /**
  * Default model for the preset — selected from the live PPQ catalog
- * (GET https://api.ppq.ai/v1/models): cheap ($0.093/$0.187 per 1M tok),
- * fast (~0.1s simple completions), 1M context, `response_format` +
- * `max_completion_tokens` support, and `privacyLevel: "zdr"`.
- * Operators can change it post-deploy via the PPQ_MODEL plain-text var
- * (e.g. append `:floor` for cheapest-provider routing or `:nitro` for
- * highest-throughput routing).
+ * (GET https://api.ppq.ai/v1/models) and benchmarked against the real
+ * gateway workload: OpenAI's gpt-oss-20b (20B MoE, ~3.6B active) is the
+ * best cheap fit for structured trading analysis:
+ *   - ZDR-capable (`privacyLevel: "zdr"`) and native `structured_outputs`
+ *   - $0.019/$0.095 per 1M tokens — ~28% cheaper per call than
+ *     deepseek/deepseek-v4-flash at our ~1.6K-in/0.8K-out shape
+ *   - fastest generator measured (~87 tok/s observed; 9s full analysis)
+ *   - correct failure-code classification (economic/infrastructure/control)
+ * Runners-up kept as dashboard-swappable options via PPQ_MODEL:
+ *   deepseek/deepseek-v4-flash (strongest grounding, slower, pricier),
+ *   inclusionai/ling-3.0-flash (cheapest, loose schema adherence).
+ * Operators can also append `:floor` (cheapest provider) or `:nitro`
+ * (highest throughput) to the PPQ_MODEL var without redeploying.
  */
-export const LEEF_TRADER_MODEL = 'deepseek/deepseek-v4-flash';
+export const LEEF_TRADER_MODEL = 'openai/gpt-oss-20b';
 
 export const LEEF_TRADER_SYSTEM_PROMPT = `You are the AI analysis layer for LEEF Trader — a deterministic, non-custodial trading engine on WAX (venues: Alcor CLMM via swap.alcor, Defibox, TacoSwap; core ecosystem contracts include leefmaincorp, leefstakerio, leefhopperio, leefrewarder). You are an analyst. You are NOT the trading engine, NOT a signer, NOT a broadcaster. You control no keys and have no authority to execute, authorize, or force trades.
 
@@ -262,7 +269,10 @@ export function leefTraderManifest(workerName: string): SignerManifest {
     streaming: false,
     secretName: 'PPQ_API_KEY',
     modelEnvName: 'PPQ_MODEL',
-    tokenParam: 'max_completion_tokens',
+    // `max_tokens` is the universally-supported field across the PPQ catalog
+    // (the cheap ZDR tier does not advertise max_completion_tokens; PPQ
+    // normalizes per upstream provider).
+    tokenParam: 'max_tokens',
     // 30s: a full analysis legitimately takes 6–25s on ZDR flash endpoints.
     // AI calls are fire-and-forget outside the trading loop, so this bounds
     // the analysis fetch — it never blocks deterministic trading.

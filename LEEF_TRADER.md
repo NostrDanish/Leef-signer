@@ -96,6 +96,40 @@ should use a fetch timeout slightly above the worker cap (e.g. 35 s).
 - `provider.zdr: true` — PPQ routes to Zero-Data-Retention providers where
   supported.
 
+## Fast typed judgments — `/api/judge` (TypeSafe / Jev)
+
+Alongside the LLM analysis path, the same worker exposes **`POST /api/judge`** —
+a fast **System One** judgment endpoint backed by TypeSafe's Jev model
+(`jev-latest`). Round-trip ≈ 1–2 s, answers are typed values code consumes
+directly (no parsing, no hallucinated prose). Credentials are server-side
+(`TYPESAFE_API_KEY` Worker secret); the model is forced by the deployment —
+a client-supplied `model` field is rejected.
+
+Request: `{ "state": <string or object>, "questions": { <name>: {type, instructions?, criteria?} } }`
+— 1–16 questions per call (`noul` = yes-probability, `choice` = selection over
+`criteria` with per-option probabilities + confidence, `score` = 1–10 level
+rubric with confidence). State ≤ 65 KB serialized; question instructions
+≤ 4 KB; ≥ 2 choices per Choice. Invalid or oversized input → 400 before any
+upstream call. Example — classify a failed trade:
+
+```json
+{
+  "state": { "strategy": "meanrev", "failureCode": "MIN_OUT_FAILED",
+             "regime": "high_vol", "detail": "…" },
+  "questions": {
+    "failure_class": { "type": "choice", "instructions": "Primary cause?",
+      "criteria": { "economic": "market moved against the trade",
+                    "infrastructure": "transport noise",
+                    "control": "a deterministic gate rejected it by design" } },
+    "escalate": { "type": "noul", "instructions": "Needs human review?" }
+  }
+}
+```
+
+Answers arrive keyed by question name with probabilities and confidence —
+gate behavior on confidence, log everything, and let the deterministic engine
+stay authoritative.
+
 ## Operating the model
 
 The model is a plain-text Worker var, **`PPQ_MODEL`**, changeable from the

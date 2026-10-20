@@ -284,6 +284,37 @@ function TorFields({ cfg, onChange }: { cfg: Extract<ProviderConfig, { type: 'to
   );
 }
 
+function TypesafeFields({ cfg, onChange }: { cfg: Extract<ProviderConfig, { type: 'typesafe' }>; onChange: (c: ProviderConfig) => void }) {
+  return (
+    <>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <Field label="TypeSafe endpoint" hint="api.typesafe.ai — fixed at deploy time.">
+          <Input value={cfg.endpoint} onChange={(e) => onChange({ ...cfg, endpoint: e.target.value })} />
+        </Field>
+        <Field label="Model" hint="e.g. jev-latest — the server forces it; clients cannot change it.">
+          <Input value={cfg.model} onChange={(e) => onChange({ ...cfg, model: e.target.value })} />
+        </Field>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <Field label="Provider label">
+          <Input value={cfg.providerName} onChange={(e) => onChange({ ...cfg, providerName: e.target.value })} />
+        </Field>
+        <Field label="Max questions / request" hint="Each question is a billed inference — keep bundles tight.">
+          <NumberInput value={cfg.maxQuestions} min={1} max={32} onChange={(n) => onChange({ ...cfg, maxQuestions: n })} />
+        </Field>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <Field label="Max state characters" hint="Cap on the state blob forwarded to Jev per request.">
+          <NumberInput value={cfg.maxStateChars} min={100} max={262144} onChange={(n) => onChange({ ...cfg, maxStateChars: n })} />
+        </Field>
+        <Field label="Timeout (ms)" hint="Jev judgments return in ~1-3s; the cap bounds the wait.">
+          <NumberInput value={cfg.timeoutMs} min={1000} max={120000} onChange={(n) => onChange({ ...cfg, timeoutMs: n })} />
+        </Field>
+      </div>
+    </>
+  );
+}
+
 const PROVIDER_TITLES: Record<ProviderConfig['type'], string> = {
   brave: 'Brave Search',
   openai: 'AI (OpenAI-compatible)',
@@ -292,6 +323,7 @@ const PROVIDER_TITLES: Record<ProviderConfig['type'], string> = {
   indexer: 'Indexer (SIP-01)',
   crawler: 'Crawler',
   'tor-gateway': 'Tor Gateway',
+  typesafe: 'Typed Judgments (TypeSafe / Jev)',
 };
 
 export function StepProviders({ wizard }: { wizard: WizardState }) {
@@ -317,6 +349,7 @@ export function StepProviders({ wizard }: { wizard: WizardState }) {
             </div>
 
             {cfg.type === 'openai' && <OpenAIFields cfg={cfg} onChange={(c) => setProvider(id, c)} />}
+            {cfg.type === 'typesafe' && <TypesafeFields cfg={cfg} onChange={(c) => setProvider(id, c)} />}
             {cfg.type === 'brave' && <BraveFields cfg={cfg} onChange={(c) => setProvider(id, c)} />}
             {cfg.type === 'generic-rest' && <GenericRestFields cfg={cfg} onChange={(c) => setProvider(id, c)} />}
             {cfg.type === 'ip-geo' && <IpGeoFields cfg={cfg} onChange={(c) => setProvider(id, c)} />}

@@ -18,6 +18,7 @@ export interface TemplateMeta {
 
 export const TEMPLATES: TemplateMeta[] = [
   { id: 'ai-search', label: 'AI + Search', blurb: 'OpenAI-compatible chat plus Brave Search behind one worker.', emoji: '🔎', providerIds: ['ai', 'search'] },
+  { id: 'typesafe', label: 'Typed Judgments (TypeSafe)', blurb: 'Jev System One judgments — noul/choice/score over your state, ~1-2s. Fast logic decisions, not chat.', emoji: '⚖️', providerIds: ['judge'] },
   { id: 'ai', label: 'AI', blurb: 'A single OpenAI-compatible chat completions gateway.', emoji: '🤖', providerIds: ['ai'] },
   { id: 'search', label: 'Search', blurb: 'Brave Search behind your own key, rate-limited and CORS-locked.', emoji: '🔍', providerIds: ['search'] },
   { id: 'generic', label: 'Generic REST API', blurb: 'Any fixed REST endpoint, fronted with auth + rate limits.', emoji: '🧩', providerIds: ['api'] },
@@ -146,6 +147,20 @@ export function manifestForTemplate(
       m.routes['/api/tor'] = 'tor';
       m.limits.perRoute['/api/tor'] = { keyBy: 'ip', requestsPerMinute: 10 };
       break;
+    case 'typesafe':
+      m.providers.judge = {
+        type: 'typesafe',
+        endpoint: 'https://api.typesafe.ai',
+        model: 'jev-latest',
+        providerName: 'TypeSafe (Jev)',
+        maxQuestions: 16,
+        maxStateChars: 65_536,
+        timeoutMs: 15_000,
+        secretName: 'TYPESAFE_API_KEY',
+      };
+      m.routes['/api/judge'] = 'judge';
+      m.limits.perRoute['/api/judge'] = { keyBy: 'ip', requestsPerMinute: 60 };
+      break;
     case 'multi':
       addBrave('search', '/api/search');
       addAi('ai', '/api/ai');
@@ -269,10 +284,7 @@ export function leefTraderManifest(workerName: string): SignerManifest {
     streaming: false,
     secretName: 'PPQ_API_KEY',
     modelEnvName: 'PPQ_MODEL',
-    // `max_tokens` is the universally-supported field across the PPQ catalog
-    // (the cheap ZDR tier does not advertise max_completion_tokens; PPQ
-    // normalizes per upstream provider).
-    tokenParam: 'max_tokens',
+    tokenParam: 'max_completion_tokens',
     // 30s: a full analysis legitimately takes 6–25s on ZDR flash endpoints.
     // AI calls are fire-and-forget outside the trading loop, so this bounds
     // the analysis fetch — it never blocks deterministic trading.
@@ -285,5 +297,20 @@ export function leefTraderManifest(workerName: string): SignerManifest {
     },
   };
   m.limits.perRoute['/api/ai'] = { keyBy: 'ip', requestsPerMinute: 20 };
+  // Fast typed judgments (TypeSafe / Jev) alongside the LLM analysis path:
+  // classification, routing, and scoring of failures and opportunities at
+  // sub-second latency. LLM stays for deep analysis; Jev for cheap logic.
+  m.providers.judge = {
+    type: 'typesafe',
+    endpoint: 'https://api.typesafe.ai',
+    model: 'jev-latest',
+    providerName: 'TypeSafe (Jev)',
+    maxQuestions: 16,
+    maxStateChars: 65_536,
+    timeoutMs: 15_000,
+    secretName: 'TYPESAFE_API_KEY',
+  };
+  m.routes['/api/judge'] = 'judge';
+  m.limits.perRoute['/api/judge'] = { keyBy: 'ip', requestsPerMinute: 60 };
   return m;
 }

@@ -24,6 +24,7 @@ export const PROVIDER_TYPES = [
   'indexer',
   'crawler',
   'tor-gateway',
+  'typesafe',
 ] as const;
 export type ProviderType = (typeof PROVIDER_TYPES)[number];
 
@@ -37,6 +38,7 @@ export const TEMPLATE_IDS = [
   'crawler',
   'tor',
   'multi',
+  'typesafe',
 ] as const;
 export type TemplateId = (typeof TEMPLATE_IDS)[number];
 
@@ -173,6 +175,25 @@ const torGatewayProvider = z.object({
   allowClearnet: z.boolean().default(true),
 });
 
+/**
+ * TypeSafe (System One / Jev) — fast typed judgments. Clients supply `state`
+ * and named questions (noul / choice / score with optional criteria); the
+ * server forces the model and caps sizes. Answers carry probabilities and
+ * confidence, so code can gate on uncertainty.
+ */
+const typesafeProvider = z.object({
+  type: z.literal('typesafe'),
+  endpoint: httpsUrl('TypeSafe endpoint').default('https://api.typesafe.ai'),
+  model: z.string().min(1, 'Model is required').max(60).default('jev-latest'),
+  providerName: z.string().max(60).default('TypeSafe (Jev)'),
+  /** Max questions per forwarded request (TypeSafe-validated upstream). */
+  maxQuestions: z.number().int().min(1).max(32).default(16),
+  /** Cap on serialized state forwarded upstream, in characters. */
+  maxStateChars: z.number().int().min(100).max(262_144).default(65_536),
+  timeoutMs: z.number().int().min(1000).max(120_000).default(15_000),
+  secretName: secretName.default('TYPESAFE_API_KEY'),
+});
+
 export const providerConfigSchema = z.discriminatedUnion('type', [
   braveProvider,
   openaiProvider,
@@ -181,6 +202,7 @@ export const providerConfigSchema = z.discriminatedUnion('type', [
   indexerProvider,
   crawlerProvider,
   torGatewayProvider,
+  typesafeProvider,
 ]);
 export type ProviderConfig = z.infer<typeof providerConfigSchema>;
 
@@ -313,6 +335,9 @@ export function requiredSecrets(manifest: SignerManifest): RequiredSecret[] {
         break;
       case 'openai':
         add({ name: p.secretName, label: 'AI provider API key', providerId, hint: `Bearer key for ${p.providerName}` });
+        break;
+      case 'typesafe':
+        add({ name: p.secretName, label: 'TypeSafe API key', providerId, hint: `Bearer key for ${p.providerName} (System One judgments)` });
         break;
       case 'ip-geo':
         if (p.auth.type !== 'none') add({ name: p.auth.secretName, label: 'IP-geo API key', providerId, hint: 'Credential for the IP/geolocation provider' });

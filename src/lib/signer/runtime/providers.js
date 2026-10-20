@@ -264,6 +264,226 @@ async function openaiHandle(ctx, cfg) {
     return {
       response: errorResponse(
         timedOut ? 'PROVIDER_TIMEOUT' : 'UPSTREAM_ERROR',
+        timedOut ? 'AI provider timed out' : 'AI provider unreachable',
+        timedOut ? 504 : 502,
+        ctx.request,
+        ctx.allowed,
+        ctx.requestId,
+      ),
+    };
+  }
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { ok: false };
+  }
+  return { response: jsonResponse(data, 200, ctx.request, ctx.allowed) };
+}
+
+/* ------------------------------------------------------------------ */
+/* TypeSafe (System One / Jev) — fast typed judgments                  */
+/* ------------------------------------------------------------------ */
+
+// The server forces the model; clients supply only state and questions.
+// Per-question limits bound token cost (each forwarded question is a billed
+// inference). Criteria/instructions are validated for shape and size.
+const TS_MAX_QUESTIONS = 32;
+const TS_ALLOWED_TYPES = new Set(['noul', 'choice', 'score']);
+
+/**
+ * @param {Cfg} cfg
+ * @param {unknown} raw
+ * @param {ProviderContext} ctx
+ * @returns {{ ok: boolean, reason?: string, state?: unknown, questions?: Record<string, unknown> }}
+ */
+function validateTypesafeBody(cfg, raw, ctx) {
+  const maxQuestions =
+    typeof cfg.maxQuestions === 'number' && cfg.maxQuestions > 0
+      ? Math.min(Math.floor(cfg.maxQuestions), TS_MAX_QUESTIONS)
+      : 16;
+  const maxStateChars =
+    typeof cfg.maxStateChars === 'number' && cfg.maxStateChars > 0
+      ? Math.min(Math.floor(cfg.maxStateChars), 262_144)
+      : 65_536;
+
+  if (raw.state === undefined || raw.state === null) {
+    return { ok: false, reason: 'state is required' };
+  }
+  if (typeof raw.state === 'string') {
+    if (raw.state.length > maxStateChars) return { ok: false, reason: `state exceeds ${maxStateChars} characters` };
+  } else if (raw.state !== null && typeof raw.state === 'object') {
+    let serialized;
+    try {
+      serialized = JSON.stringify(raw.state);
+    } catch {
+      return { ok: false, reason: 'state must be JSON-serializable' };
+    }
+    if (serialized.length > maxStateChars) return { ok: false, reason: `state exceeds ${maxStateChars} characters` };
+  } else {
+    return { ok: false, reason: 'state must be a string or object' };
+  }
+
+  const names = Object.keys(raw.questions ?? {});
+  if (names.length < 1 || names.length > maxQuestions) {
+    return { ok: false, reason: `provide 1 to ${maxQuestions} questions` };
+  }
+  const questions = {};
+  for (const name of names) {
+    if (typeof name !== 'string' || name.length === 0 || name.length > 64) {
+      return { ok: false, reason: 'question names must be 1-64 characters' };
+    }
+    const q = raw.questions[name];
+    if (!q || typeof q !== 'object') return { ok: false, reason: 'each question must be an object' };
+    const type = q.type;
+    if (!TS_ALLOWED_TYPES.has(type)) {
+      return { ok: false, reason: `question "${name}" type must be noul, choice, or score` };
+    }
+    const entry = { type };
+    if (q.instructions !== undefined) {
+      if (typeof q.instructions === 'string') {
+        if (q.instructions.length > 4_000) return { ok: false, reason: `question "${name}" instructions too long` };
+        entry.instructions = q.instructions;
+      } else if (q.instructions && typeof q.instructions === 'object') {
+        let serialized;
+        try {
+          serialized = JSON.stringify(q.instructions);
+        } catch {
+          return { ok: false, reason: `question "${name}" instructions must be serializable` };
+        }
+        if (serialized.length > 4_000) return { ok: false, reason: `question "${name}" instructions too long` };
+        entry.instructions = q.instructions;
+      } else {
+        return { ok: false, reason: `question "${name}" instructions must be a string or object` };
+      }
+    }
+    if (type === 'choice') {
+      if (!q.criteria || typeof q.criteria !== 'object' || Array.isArray(q.criteria)) {
+        return { ok: false, reason: `question "${name}" choice requires criteria object` };
+      }
+      const keys = Object.keys(q.criteria);
+      if (keys.length < 2 || keys.length > 64) {
+        return { ok: false, reason: `question "${name}" needs 2-64 choices` };
+      }
+      let criteria = {};
+      for (const k of keys) {
+        const v = q.criteria[k];
+        if (v !== null && typeof v === 'object') return { ok: false, reason: `question "${name}" choice descriptions must be strings` };
+        if (typeof v === 'string' && v.length > 1_000) return { ok: false, reason: `question "${name}" choice description too long` };
+        criteria[k] = v === undefined ? null : v;
+      }
+      entry.criteria = criteria;
+    }
+    if (type === 'score') {
+      if (!Array.isArray(q.criteria) || q.criteria.length < 1 || q.criteria.length > 10) {
+        return { ok: false, reason: `question "${name}" score needs 1-10 ordered criteria levels` };
+      }
+      entry.criteria = q.criteria;
+    }
+    if (type === 'noul' && q.criteria && typeof q.criteria === 'object' && !Array.isArray(q.criteria)) {
+      entry.criteria = q.criteria;
+    }
+    questions[name] = entry;
+  }
+  return { ok: true, state: raw.state, questions };
+}
+
+/** @param {ProviderContext} ctx @param {Cfg} cfg @returns {Promise<ProviderResult>} */
+async function typesafeHandle(ctx, cfg) {
+  const key = getSecret(ctx.env, asString(cfg.secretName) ?? 'TYPESAFE_API_KEY');
+  if (!key) return unavailable(ctx, 'TypeSafe');
+  const endpoint = (asString(cfg.endpoint) ?? 'https://api.typesafe.ai').replace(/\/$/, '');
+  const model = asString(cfg.model) ?? 'jev-latest';
+  const timeoutMs =
+    typeof cfg.timeoutMs === 'number' && Number.isFinite(cfg.timeoutMs)
+      ? Math.min(Math.max(Math.floor(cfg.timeoutMs), 1000), 120_000)
+      : 15_000;
+
+  let body;
+  try {
+    body = await readJsonBody(ctx.request, MAX_BODY);
+  } catch (e) {
+    return { response: errorResponse(e instanceof Error && e.message === 'PAYLOAD_TOO_LARGE' ? 'PAYLOAD_TOO_LARGE' : 'INVALID_REQUEST', 'Body must be JSON', 400, ctx.request, ctx.allowed, ctx.requestId) };
+  }
+  const raw = (body ?? {});
+  if (raw.model !== undefined && asString(raw.model) !== undefined) {
+    return { response: errorResponse('INVALID_REQUEST', 'model is fixed by the deployment', 400, ctx.request, ctx.allowed, ctx.requestId) };
+  }
+
+  const check = validateTypesafeBody(cfg, raw, ctx);
+  if (!check.ok) {
+    return { response: errorResponse('INVALID_REQUEST', check.reason ?? 'invalid request', 400, ctx.request, ctx.allowed, ctx.requestId) };
+  }
+
+  const upstreamBody = {
+    model,
+    state: check.state,
+    questions: check.questions,
+  };
+
+  let upstream;
+  try {
+    upstream = await fetch(`${endpoint}/v1/systemone`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify(upstreamBody),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (e) {
+    const timedOut = Boolean(e && typeof e === 'object' && (e.name === 'TimeoutError' || e.name === 'AbortError'));
+    return {
+      response: errorResponse(
+        timedOut ? 'PROVIDER_TIMEOUT' : 'PROVIDER_UNAVAILABLE',
+        timedOut ? 'TypeSafe timed out' : 'TypeSafe unreachable',
+        timedOut ? 504 : 502,
+        ctx.request,
+        ctx.allowed,
+        ctx.requestId,
+      ),
+    };
+  }
+
+  if (!upstream.ok) {
+    await upstream.body?.cancel().catch(() => undefined);
+    return { response: errorResponse('UPSTREAM_ERROR', upstreamMessage(upstream.status, 'TypeSafe'), upstream.status === 429 ? 429 : 502, ctx.request, ctx.allowed, ctx.requestId) };
+  }
+
+  let text;
+  try {
+    text = await upstream.text();
+  } catch (e) {
+    const timedOut = Boolean(e && typeof e === 'object' && (e.name === 'TimeoutError' || e.name === 'AbortError'));
+    return {
+      response: errorResponse(
+        timedOut ? 'PROVIDER_TIMEOUT' : 'UPSTREAM_ERROR',
+        timedOut ? 'TypeSafe timed out' : 'TypeSafe response was interrupted',
+        timedOut ? 504 : 502,
+        ctx.request,
+        ctx.allowed,
+        ctx.requestId,
+      ),
+    };
+  }
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { ok: false };
+  }
+  return { response: jsonResponse(data, 200, ctx.request, ctx.allowed) };
+}
+
+  // The abort signal bounds the whole request INCLUDING the body read: a slow
+  // generation that trickles past the deadline must surface as a clean
+  // PROVIDER_TIMEOUT, never as a swallowed parse error.
+  let text;
+  try {
+    text = await upstream.text();
+  } catch (e) {
+    const timedOut = Boolean(e && typeof e === 'object' && (e.name === 'TimeoutError' || e.name === 'AbortError'));
+    return {
+      response: errorResponse(
+        timedOut ? 'PROVIDER_TIMEOUT' : 'UPSTREAM_ERROR',
         timedOut ? 'AI provider timed out' : 'AI provider response was interrupted',
         timedOut ? 504 : 502,
         ctx.request,
@@ -575,6 +795,8 @@ export async function dispatchProvider(type, ctx, cfg) {
       return crawlerHandle(ctx, cfg);
     case 'tor-gateway':
       return torGatewayHandle(ctx, cfg);
+    case 'typesafe':
+      return typesafeHandle(ctx, cfg);
     default:
       return { response: errorResponse('CONFIGURATION_ERROR', `Unknown provider type "${type}"`, 500, ctx.request, ctx.allowed, ctx.requestId) };
   }
@@ -617,6 +839,14 @@ export async function healthCheckProvider(id, type, cfg, env) {
       case 'openai': {
         const endpoint = (asString(cfg.endpoint) ?? 'https://api.openai.com/v1').replace(/\/$/, '');
         const r = await fetch(`${endpoint}/models`, {
+          headers: { Authorization: `Bearer ${secret}` }, signal: AbortSignal.timeout(8000),
+        });
+        await r.body?.cancel().catch(() => undefined);
+        return { id, ok: r.ok, detail: r.ok ? `API key valid (${asString(cfg.providerName) ?? 'provider'})` : `HTTP ${r.status}`, latencyMs: Date.now() - started };
+      }
+      case 'typesafe': {
+        const endpoint = (asString(cfg.endpoint) ?? 'https://api.typesafe.ai').replace(/\/$/, '');
+        const r = await fetch(`${endpoint}/v1/models`, {
           headers: { Authorization: `Bearer ${secret}` }, signal: AbortSignal.timeout(8000),
         });
         await r.body?.cancel().catch(() => undefined);

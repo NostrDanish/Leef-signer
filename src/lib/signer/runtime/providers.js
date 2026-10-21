@@ -473,34 +473,6 @@ async function typesafeHandle(ctx, cfg) {
   return { response: jsonResponse(data, 200, ctx.request, ctx.allowed) };
 }
 
-  // The abort signal bounds the whole request INCLUDING the body read: a slow
-  // generation that trickles past the deadline must surface as a clean
-  // PROVIDER_TIMEOUT, never as a swallowed parse error.
-  let text;
-  try {
-    text = await upstream.text();
-  } catch (e) {
-    const timedOut = Boolean(e && typeof e === 'object' && (e.name === 'TimeoutError' || e.name === 'AbortError'));
-    return {
-      response: errorResponse(
-        timedOut ? 'PROVIDER_TIMEOUT' : 'UPSTREAM_ERROR',
-        timedOut ? 'AI provider timed out' : 'AI provider response was interrupted',
-        timedOut ? 504 : 502,
-        ctx.request,
-        ctx.allowed,
-        ctx.requestId,
-      ),
-    };
-  }
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    data = { ok: false };
-  }
-  return { response: jsonResponse(data, 200, ctx.request, ctx.allowed) };
-}
-
 /* ------------------------------------------------------------------ */
 /* Generic REST (fixed endpoint; never a browser-controlled URL)       */
 /* ------------------------------------------------------------------ */
@@ -635,7 +607,7 @@ async function indexerHandle(ctx, cfg) {
     if (v !== null && key !== 'q' && key !== 'query') url.searchParams.set(key, v);
   }
 
-  const headers = new Headers({ Accept: 'application/json' });
+  const headers = new Headers({ 'Content-Type': 'application/json' });
   if (asString(auth.type) === 'bearer') {
     const name = asString(auth.secretName);
     const secret = name ? getSecret(ctx.env, name) : undefined;

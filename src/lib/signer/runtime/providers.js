@@ -682,7 +682,7 @@ async function crawlerHandle(ctx, cfg) {
   if (!upstream) return { response: errorResponse('PROVIDER_UNAVAILABLE', 'Crawler unreachable', 502, ctx.request, ctx.allowed, ctx.requestId) };
   if (!upstream.ok) {
     await upstream.body?.cancel().catch(() => undefined);
-    return { response: errorResponse('UPSTREAM_ERROR', upstreamMessage(upstream.status, 'Crawler'), upstream.status === 429 ? 429 : 502, ctx.request, ctx.allowed, ctx.requestId) };
+    return { response: errorResponse('UPSTREAM_ERROR', upstreamMessage(upstream.status, 'Crawler'), 502, ctx.request, ctx.allowed, ctx.requestId) };
   }
   return { response: jsonResponse(await safeJson(upstream), 200, ctx.request, ctx.allowed) };
 }
@@ -736,7 +736,7 @@ async function torGatewayHandle(ctx, cfg) {
   if (!upstream) return { response: errorResponse('PROVIDER_UNAVAILABLE', 'Tor gateway unreachable', 502, ctx.request, ctx.allowed, ctx.requestId) };
   if (!upstream.ok) {
     await upstream.body?.cancel().catch(() => undefined);
-    return { response: errorResponse('UPSTREAM_ERROR', upstreamMessage(upstream.status, 'Tor gateway'), upstream.status === 429 ? 429 : 502, ctx.request, ctx.allowed, ctx.requestId) };
+    return { response: errorResponse('UPSTREAM_ERROR', upstreamMessage(upstream.status, 'Tor gateway'), 502, ctx.request, ctx.allowed, ctx.requestId) };
   }
   return { response: jsonResponse(await safeJson(upstream), 200, ctx.request, ctx.allowed) };
 }

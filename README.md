@@ -4,12 +4,12 @@
 
 A one-click deployment tool (fork of [0xSigner](https://github.com/NostrDanish/0xsigner)) that
 turns a form into a hardened, rate-limited Cloudflare Worker — preconfigured as the
-**AI analysis gateway for [LEEF Trader](https://github.com/NostrDanish/leef-trader)**
+**AI analysis gateway for [LEEF Trader](https://github.com/leeftoken/leef-trader)**
 ([leef-trader.vercel.app](https://leef-trader.vercel.app)).
 
 > **FORM → TEST → DEPLOY → DONE** — as easy as deploying a Nostr relay.
 
-[![Edit with Shakespeare](https://shakespeare.diy/badge.svg)](https://shakespeare.diy/clone?url=https%3A%2F%2Fgithub.com%2FNostrDanish%2FLeef-signer.git)
+[![Edit with Shakespeare](https://shakespeare.diy/badge.svg)](https://shakespeare.diy/clone?url=https%3A%2F%2Fgithub.com%2Fleeftoken%2FLeef-signer.git)
 
 ## What it deploys
 

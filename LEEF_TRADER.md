@@ -1,6 +1,6 @@
 # LEEF Trader ↔ AI gateway — integration contract
 
-This is the contract between [LEEF Trader](https://github.com/NostrDanish/leef-trader)
+This is the contract between [LEEF Trader](https://github.com/leeftoken/leef-trader)
 and a Worker deployed by this tool (default name `leef-trader-ai`).
 
 ## Endpoint

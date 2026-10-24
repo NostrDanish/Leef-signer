@@ -179,7 +179,9 @@ export function errorResponse(code, message, status, request, allowed, requestId
 export function checkPublicAuth(request, manifest, env) {
   const auth = manifest.security.publicAuth;
   if (auth.type === 'none') return true;
-  if (auth.type === 'nip98') return true; // structural NIP-98 check is per-route; presence-only here
+  // NIP-98 is not implemented. Fail closed so a manifest that still says
+  // nip98 cannot deploy an open gateway. The wizard only offers none | api-key.
+  if (auth.type === 'nip98') return false;
   const expected = env[auth.secretName];
   if (typeof expected !== 'string' || expected.length === 0) return false;
   const header = request.headers.get('Authorization') ?? '';

@@ -1,5 +1,7 @@
 # LEEF Trader Signer
 
+Official site: https://leeftoken.io. Official GitHub: https://github.com/leeftoken (this repo is https://github.com/leeftoken/Leef-signer).
+
 **Bring your own Cloudflare account. Bring your own PPQ API key. Deploy the LEEF Trader AI gateway.**
 
 A one-click deployment tool (fork of [0xSigner](https://github.com/NostrDanish/0xsigner)) that

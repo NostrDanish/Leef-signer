@@ -1,7 +1,7 @@
 # LEEF Trader Signer
 
 A fork of [0xSigner](https://github.com/NostrDanish/0xsigner) that deploys the
-**AI analysis gateway for [LEEF Trader](https://github.com/NostrDanish/leef-trader)**.
+**AI analysis gateway for [LEEF Trader](https://github.com/leeftoken/leef-trader)**.
 The wizard turns a form into a hardened Cloudflare Worker fronting PayPerQ
 (OpenAI-compatible): `PPQ_API_KEY` goes to the Worker secret store, the model
 (`deepseek/deepseek-v4-flash`, overridable via the `PPQ_MODEL` plain-text var) and
